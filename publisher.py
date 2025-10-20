@@ -16,12 +16,12 @@ DELTA_SIM_SECONDS = PUBLISH_INTERVAL * TIME_SPEED_FACTOR
 DELTA_SIM_HOURS = DELTA_SIM_SECONDS / 3600.0
 PUBLISHES_PER_SIM_DAY = int(86400 / DELTA_SIM_SECONDS)
 
-# Plant types with dry multipliers (faster dry = higher multiplier)
+# Plant types with dry multipliers (updated for realism)
 PLANT_TYPES = {
     "tomato": 1.2,
-    "basil": 1.0,
-    "rose": 0.9,
-    "succulent": 0.7,
+    "basil": 1.3,
+    "rose": 1.0,
+    "succulent": 0.6,
     "fern": 1.1,
     "orchid": 0.8
 }
@@ -38,6 +38,10 @@ class PlantPublisher(threading.Thread):
         self.client.loop_start()
         self.running = True
 
+        # Subscribe to water events
+        self.client.message_callback_add(f"control/water/{self.plant_id}", self._on_water)
+        self.client.subscribe(f"control/water/{self.plant_id}")
+
         # Simulated state
         self.current_soil_moisture = initial_moisture
         self.current_ph = initial_ph
@@ -53,6 +57,17 @@ class PlantPublisher(threading.Thread):
     def _get_base_dry_rate(self):
         rates = {"indoor": 0.3, "outdoor": 0.8, "greenhouse": 0.5}
         return rates.get(self.environment, 0.5)
+
+    def _on_water(self, client, userdata, msg):
+        try:
+            data = json.loads(msg.payload.decode())
+            boost = data.get("boost", 15)  # Backend sends e.g. 20%
+            self.current_soil_moisture = min(100, self.current_soil_moisture + boost)
+            # Optional: Reset pH slightly (water neutralizes)
+            self.current_ph = min(7.5, self.current_ph + 0.2)
+            print(f"[{self.client_id}] 💧 Auto-watered: +{boost}% (now {self.current_soil_moisture:.1f}%, pH {self.current_ph:.1f})")
+        except Exception as e:
+            print(f"Water error: {e}")
 
     def _update_rain_status(self):
         current_day = self.simulated_time.date()
