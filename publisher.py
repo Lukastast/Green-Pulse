@@ -3,6 +3,7 @@ import json
 import random
 import paho.mqtt.client as mqtt
 
+# use "pip install paho-mqtt" to setup publisher dependencies
 # Configuration
 BROKER = "localhost"          # or the IP of the Mosquitto broker
 PORT = 1883                   # 8883 if using TLS
