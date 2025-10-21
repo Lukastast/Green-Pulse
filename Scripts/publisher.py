@@ -5,13 +5,13 @@ import math
 import paho.mqtt.client as mqtt
 from datetime import datetime
 from paho.mqtt.client import CallbackAPIVersion  # Correct import for VERSION2
+import uuid  # For unique CLIENT_ID
+import ssl  # For TLS
 
 # Configuration
-BROKER = "localhost"
-PORT = 1883
-USERNAME = "sensor_user"  # Add for security
-PASSWORD = "secureapp123"  # Add for security
-CLIENT_ID = "SimulatedPublisher"
+BROKER = "broker.emqx.io"  # EMQX public broker
+PORT = 8883  # TLS port
+CLIENT_ID = str(uuid.uuid4())  # Unique ID each run
 ENVIRONMENTS = ["house", "garden", "greenhouse"]
 SENSORS = ["light", "humidity", "ph"]
 
@@ -28,7 +28,7 @@ client = mqtt.Client(
     client_id=CLIENT_ID,
     protocol=mqtt.MQTTv5  # v5 for properties
 )
-client.username_pw_set(USERNAME, PASSWORD)  # Security
+client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2)  # Enable TLS (system CA certs)
 client.on_connect = on_connect  # Optional: For debug
 
 # Connect

@@ -1,12 +1,12 @@
 import paho.mqtt.client as mqtt
 from paho.mqtt.client import CallbackAPIVersion  # Correct import for VERSION2
+import uuid  # For unique CLIENT_ID
+import ssl  # For TLS
 
 # Configuration
-BROKER = "localhost"
-PORT = 1883
-USERNAME = "app_user"
-PASSWORD = "appsecure456"
-CLIENT_ID = "SimulatedSubscriber"
+BROKER = "broker.emqx.io"  # EMQX public broker
+PORT = 8883  # TLS port
+CLIENT_ID = str(uuid.uuid4())  # Unique ID each run
 
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Connected with result code {reason_code}")
@@ -25,7 +25,7 @@ client = mqtt.Client(
     client_id=CLIENT_ID,
     protocol=mqtt.MQTTv5
 )
-client.username_pw_set(USERNAME, PASSWORD)
+client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2)  # Enable TLS (system CA certs)
 client.on_connect = on_connect
 client.on_message = on_message
 
