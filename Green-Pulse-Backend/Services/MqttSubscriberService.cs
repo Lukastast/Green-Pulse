@@ -9,60 +9,63 @@ using Microsoft.Extensions.Logging;
 namespace Green_Pulse_Backend.Services
 {
     public class MqttSubscriberService : IHostedService
+{
+    private readonly ILogger<MqttSubscriberService> _logger;
+    private IMqttClient _mqttClient;
+
+    // Liste til midlertidigt at gemme beskeder
+    public List<string> Messages { get; private set; } = new List<string>();
+
+    public MqttSubscriberService(ILogger<MqttSubscriberService> logger)
     {
-        private readonly ILogger<MqttSubscriberService> _logger;
-        private IMqttClient _mqttClient;
+        _logger = logger;
+    }
 
-        public MqttSubscriberService(ILogger<MqttSubscriberService> logger)
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Starting MQTT Subscriber Service...");
+
+        var factory = new MqttFactory();
+        _mqttClient = factory.CreateMqttClient();
+
+        _mqttClient.ApplicationMessageReceivedAsync += async e =>
         {
-            _logger = logger;
-        }
+            string topic = e.ApplicationMessage.Topic;
+            string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
+            _logger.LogInformation($"Received on {topic}: {payload}");
 
-        public async Task StartAsync(CancellationToken cancellationToken)
+            // Gem beskeden i listen
+            Messages.Add($"Topic: {topic}, Payload: {payload}");
+        };
+
+        _mqttClient.ConnectedAsync += async e =>
         {
-            _logger.LogInformation("Starting MQTT Subscriber Service...");
-
-            var factory = new MqttFactory();
-            _mqttClient = factory.CreateMqttClient();
-
-            // Event for received messages
-            _mqttClient.ApplicationMessageReceivedAsync += async e =>
-            {
-                string topic = e.ApplicationMessage.Topic;
-                string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                _logger.LogInformation($"Received on {topic}: {payload}");
-            };
-
-            // Event for connected
-            _mqttClient.ConnectedAsync += async e =>
-            {
-                _logger.LogInformation("Connected to MQTT broker!");
-
-                // Subscribe to topic
-                var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                    .WithTopicFilter("greenpulse/#")
-                    .Build();
-
-                await _mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
-                _logger.LogInformation("Subscribed to greenpulse/#");
-            };
-
-            var options = new MqttClientOptionsBuilder()
-                .WithClientId("aspnetcore_subscriber")
-                .WithTcpServer("broker.emqx.io", 8883)
-                .WithTls() // Use TLS
+            _logger.LogInformation("Connected to MQTT broker!");
+            var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
+                .WithTopicFilter("greenpulse/#")
                 .Build();
 
-            await _mqttClient.ConnectAsync(options, cancellationToken);
-        }
+            await _mqttClient.SubscribeAsync(subscribeOptions, cancellationToken);
+            _logger.LogInformation("Subscribed to greenpulse/#");
+        };
 
-        public async Task StopAsync(CancellationToken cancellationToken)
+        var options = new MqttClientOptionsBuilder()
+            .WithClientId("aspnetcore_subscriber")
+            .WithTcpServer("broker.emqx.io", 8883)
+            .WithTls()
+            .Build();
+
+        await _mqttClient.ConnectAsync(options, cancellationToken);
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Stopping MQTT Subscriber Service...");
+        if (_mqttClient != null)
         {
-            _logger.LogInformation("Stopping MQTT Subscriber Service...");
-            if (_mqttClient != null)
-            {
-                await _mqttClient.DisconnectAsync();
-            }
+            await _mqttClient.DisconnectAsync();
         }
     }
+}
+
 }

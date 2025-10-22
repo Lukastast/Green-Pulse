@@ -8,6 +8,9 @@
 # Firebase key (sensitive credentials)
 Green-Pulse-Backend/firebase-key.json
 
+# Solution files
+Green-Pulse.sln
+
 # User-specific files
 *.rsuser
 *.suo
