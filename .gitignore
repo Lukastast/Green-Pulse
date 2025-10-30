@@ -8,6 +8,20 @@
 # Firebase key (sensitive credentials)
 Green-Pulse-Backend/firebase-key.json
 
+# Gradle filer
+.gradle/
+build/
+local.properties
+
+# Android Studio
+.idea/
+*.iml
+
+# Visual Studio / .NET filer
+*.sln
+*.user
+*.vs/
+
 # User-specific files
 *.rsuser
 *.suo
