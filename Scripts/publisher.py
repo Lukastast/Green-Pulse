@@ -1,50 +1,106 @@
-import paho.mqtt.client as mqtt
-import ssl
-import random
 import json
+import random
 import time
+import threading
+import ssl
 import uuid
-from datetime import datetime, timedelta
+import paho.mqtt.client as mqtt
 
-# -------------------------------
-# MQTT CONFIGURATION
-# -------------------------------
+# ---------------- MQTT CONFIG ---------------- #
 BROKER = "broker.emqx.io"
 PORT = 8883
 CLIENT_ID = f"greenpulse-sim-{uuid.uuid4()}"
 KEEPALIVE = 60
+TOPIC = "greenpulse/simulator"
 
-# -------------------------------
-# ENVIRONMENT AND SEASONAL SETUP
-# -------------------------------
-ENVIRONMENTS = {
-    "house": {"light": 0.7, "temp": 22, "humidity": 45},
-    "garden": {"light": 1.0, "temp": 20, "humidity": 60},
-    "greenhouse": {"light": 0.9, "temp": 26, "humidity": 70},
+# ---------------- PLANT DATA ---------------- #
+active_plants = {}
+update_interval = 10  # 10 seconds = 1 simulated hour
+
+# How long (in simulated hours) a plant can survive bad conditions
+MAX_BAD_HOURS = 12  # i.e. 2 real minutes (12 * 10 seconds)
+
+# Default environment settings
+plant_types = {
+    "cactus": {"ideal_ph": 6.0, "min_hum": 20, "max_hum": 40, "dry_rate": 0.5},
+    "tropical": {"ideal_ph": 6.5, "min_hum": 60, "max_hum": 90, "dry_rate": 0.2},
+    "herb": {"ideal_ph": 6.8, "min_hum": 50, "max_hum": 80, "dry_rate": 0.3},
+    "default": {"ideal_ph": 6.5, "min_hum": 40, "max_hum": 70, "dry_rate": 0.3}
 }
 
-SEASON_TEMPS = {"spring": 7.2, "summer": 16.6, "autumn": 9.8, "winter": 1.7}
-SEASON_AIR_HUMS = {"spring": 77, "summer": 76, "autumn": 83, "winter": 86}
-SEASON_MAX_LIGHTS = {"spring": 85000, "summer": 100000, "autumn": 60000, "winter": 30000}
+# ---------------- PLANT LOGIC ---------------- #
 
-# -------------------------------
-# PLANT STATE
-# -------------------------------
-active_plants = [f"plant{i:02d}" for i in range(1, 31)]
-plant_water_state = {}
-plant_ph_targets = {}
-plant_humidity = {p: random.uniform(50, 80) for p in active_plants}
-plant_ph = {p: random.uniform(6.0, 7.5) for p in active_plants}
+def water_plant(plant_id, amount):
+    if plant_id in active_plants:
+        plant = active_plants[plant_id]
+        plant["humidity"] += amount * 100
+        if plant["humidity"] > 100:
+            plant["humidity"] = 100
+        print(f"💧 Watered {plant_id}. New humidity: {plant['humidity']:.1f}%")
 
-# -------------------------------
-# MQTT CALLBACKS
-# -------------------------------
-def on_connect(client, userdata, flags, rc, properties=None):
-    if rc == 0:
-        print("✅ Connected to MQTT Broker")
-        client.subscribe("greenpulse/control/#")
-    else:
-        print(f"❌ Failed to connect: {rc}")
+
+def regulate_ph(plant_id, target):
+    if plant_id in active_plants:
+        plant = active_plants[plant_id]
+        delta = target - plant["ph"]
+        plant["ph"] += delta * 0.5
+        print(f"⚗️ Regulated {plant_id} pH to {plant['ph']:.2f}")
+
+
+def update_plants(client):
+    """Simulate hourly changes in plant conditions."""
+    while True:
+        to_remove = []
+        for plant_id, plant in list(active_plants.items()):
+            env = plant_types.get(plant["type"], plant_types["default"])
+
+            # Skip dead plants
+            if not plant["alive"]:
+                continue
+
+            # Simulate temperature impact on drying
+            temp_effect = (plant["temperature"] - 20) * 0.02
+            humidity_loss = (env["dry_rate"] + temp_effect) * random.uniform(0.8, 1.2)
+            plant["humidity"] -= humidity_loss
+            plant["humidity"] = max(0, plant["humidity"])
+
+            # Random pH drift
+            plant["ph"] += random.uniform(-0.05, 0.05)
+            plant["ph"] = max(4.0, min(8.0, plant["ph"]))
+
+            # Check for bad conditions
+            bad = (
+                plant["humidity"] < env["min_hum"]
+                or plant["humidity"] > env["max_hum"]
+                or abs(plant["ph"] - env["ideal_ph"]) > 1.0
+            )
+
+            if bad:
+                plant["bad_hours"] += 1
+                print(f"⚠️ {plant_id} is in bad condition ({plant['bad_hours']}h).")
+                if plant["bad_hours"] >= MAX_BAD_HOURS:
+                    plant["alive"] = False
+                    print(f"💀 {plant_id} has died after prolonged bad conditions.")
+                    client.publish(TOPIC, json.dumps({
+                        "event": "plant_dead",
+                        "plantId": plant_id
+                    }))
+            else:
+                plant["bad_hours"] = 0  # reset counter if back to normal
+
+            # Print status
+            status = "DEAD" if not plant["alive"] else "OK"
+            print(f"🌿 {plant_id} | Type: {plant['type']} | Humidity: {plant['humidity']:.1f}% | pH: {plant['ph']:.2f} | Temp: {plant['temperature']}°C | {status}")
+
+        time.sleep(update_interval)  # 1 hour passes every 10 seconds
+
+
+# ---------------- MQTT HANDLERS ---------------- #
+
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    print(f"✅ Connected to MQTT broker ({BROKER}) with code {reason_code}")
+    client.subscribe(TOPIC)
+
 
 def on_message(client, userdata, msg):
     try:
@@ -57,10 +113,19 @@ def on_message(client, userdata, msg):
 
         if action == "add_plant":
             if plant_id not in active_plants:
-                active_plants.append(plant_id)
-                plant_humidity[plant_id] = random.uniform(50, 80)
-                plant_ph[plant_id] = random.uniform(6.0, 7.5)
-                print(f"🌱 Added new plant: {plant_id}")
+                plant_type = payload.get("type", "default")
+                environment = plant_types.get(plant_type, plant_types["default"])
+
+                active_plants[plant_id] = {
+                    "type": plant_type,
+                    "humidity": random.uniform(environment["min_hum"], environment["max_hum"]),
+                    "ph": random.uniform(6.0, 7.5),
+                    "temperature": random.uniform(18, 28),
+                    "bad_hours": 0,
+                    "alive": True
+                }
+
+                print(f"🌱 Added new plant '{plant_id}' of type '{plant_type}'")
 
         elif action == "water":
             amount = float(payload.get("amount", 0.3))
@@ -70,124 +135,35 @@ def on_message(client, userdata, msg):
             target = float(payload.get("target", 6.5))
             regulate_ph(plant_id, target)
 
+        elif action == "set_temp":
+            temp = float(payload.get("temp", 22))
+            if plant_id in active_plants:
+                active_plants[plant_id]["temperature"] = temp
+                print(f"🌡️ Temperature for {plant_id} set to {temp}°C")
+
     except Exception as e:
         print(f"⚠️ Error in on_message: {e}")
 
-# -------------------------------
-# PLANT ACTIONS
-# -------------------------------
-def water_plant(plant_key, amount=0.3):
-    """Increase soil humidity for a given plant."""
-    plant_water_state[plant_key] = {
-        "added_hum": amount,
-        "timestamp": time.time()
-    }
-    print(f"💧 Watered {plant_key} (+{amount:.2f})")
 
-def regulate_ph(plant_key, target_ph):
-    """Set target pH value for a plant."""
-    plant_ph_targets[plant_key] = target_ph
-    print(f"⚗️ Regulating pH for {plant_key} → {target_ph:.2f}")
+# ---------------- MAIN ---------------- #
 
-# -------------------------------
-# DATA GENERATION
-# -------------------------------
-def generate_temperature(season, hour):
-    base = SEASON_TEMPS[season]
-    daily_variation = 4 * (1 - abs(12 - hour) / 12)
-    noise = random.uniform(-1, 1)
-    return base + daily_variation + noise
+def main():
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, CLIENT_ID)
+    client.on_connect = on_connect
+    client.on_message = on_message
 
-def generate_light(season, hour):
-    daylight = SEASON_MAX_LIGHTS[season]
-    if 6 <= hour <= 18:
-        daylight_factor = max(0, 1 - abs(12 - hour) / 6)
-        return daylight * daylight_factor
-    return 0
+    client.tls_set(cert_reqs=ssl.CERT_NONE)
+    client.tls_insecure_set(True)
+    client.connect(BROKER, PORT, KEEPALIVE)
+    client.loop_start()
 
-def generate_air_humidity(season, hour):
-    base = SEASON_AIR_HUMS[season]
-    variation = 10 * (1 - abs(12 - hour) / 12)
-    return base + random.uniform(-5, 5) + variation
+    # Start background simulation
+    threading.Thread(target=update_plants, args=(client,), daemon=True).start()
 
-def update_soil_humidity(current_hum, temp, light, plant_key):
-    drying_factor = (temp / 30.0) + (light / 100000.0)
-    new_hum = current_hum - random.uniform(0, drying_factor * 5)
-
-    # Apply watering boost if exists
-    if plant_key in plant_water_state:
-        added = plant_water_state[plant_key]["added_hum"]
-        elapsed = time.time() - plant_water_state[plant_key]["timestamp"]
-        decay = max(0, 1 - elapsed / 300)  # ~5 min decay
-        new_hum += added * 50 * decay  # convert to % moisture
-        if decay <= 0:
-            del plant_water_state[plant_key]
-
-    return max(0, min(100, new_hum))
-
-def update_ph(current_ph, plant_key):
-    if plant_key in plant_ph_targets:
-        target = plant_ph_targets[plant_key]
-        current_ph += (target - current_ph) * 0.2
-    return round(current_ph, 2)
-
-# -------------------------------
-# MQTT CLIENT SETUP
-# -------------------------------
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, CLIENT_ID)
-client.on_connect = on_connect
-client.on_message = on_message
-client.tls_set(cert_reqs=ssl.CERT_NONE)
-client.tls_insecure_set(True)
-client.connect(BROKER, PORT, KEEPALIVE)
-client.loop_start()
-
-# -------------------------------
-# MAIN SIMULATION LOOP
-# -------------------------------
-season = "summer"  # change as needed
-simulated_time = datetime(2025, 1, 1, 6, 0, 0)  # start at 6 AM
-
-print("🌿 Simulation running (1h = 10s)...\n")
-
-try:
+    # Keep running
     while True:
-        hour = simulated_time.hour
-        total_temp = 0
-        total_soil_hum = 0
+        time.sleep(1)
 
-        for plant_key in active_plants:
-            env = random.choice(list(ENVIRONMENTS.keys()))
-            env_data = ENVIRONMENTS[env]
 
-            temp = generate_temperature(season, hour)
-            light = generate_light(season, hour)
-            air_hum = generate_air_humidity(season, hour)
-
-            # Update states
-            plant_humidity[plant_key] = update_soil_humidity(plant_humidity[plant_key], temp, light, plant_key)
-            plant_ph[plant_key] = update_ph(plant_ph[plant_key], plant_key)
-
-            total_temp += temp
-            total_soil_hum += plant_humidity[plant_key]
-
-            # Publish MQTT messages
-            base_topic = f"greenpulse/{env}/{plant_key}"
-            client.publish(f"{base_topic}/temperature", json.dumps({"value": round(temp, 2)}))
-            client.publish(f"{base_topic}/light", json.dumps({"value": round(light, 2)}))
-            client.publish(f"{base_topic}/air_humidity", json.dumps({"value": round(air_hum, 2)}))
-            client.publish(f"{base_topic}/soil_humidity", json.dumps({"value": round(plant_humidity[plant_key], 2)}))
-            client.publish(f"{base_topic}/ph", json.dumps({"value": round(plant_ph[plant_key], 2)}))
-
-        avg_temp = total_temp / len(active_plants)
-        avg_soil = total_soil_hum / len(active_plants)
-        print(f"🕒 Sim Time: {simulated_time.strftime('%H:%M')} | 🌡️ {avg_temp:.1f}°C | 💧 {avg_soil:.1f}% | 🌱 {len(active_plants)} plants")
-
-        # Advance simulated time by 1 hour every 10 seconds
-        simulated_time += timedelta(hours=1)
-        time.sleep(10)
-
-except KeyboardInterrupt:
-    print("🛑 Simulation stopped.")
-    client.loop_stop()
-    client.disconnect()
+if __name__ == "__main__":
+    main()
