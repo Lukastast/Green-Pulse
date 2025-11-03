@@ -9,8 +9,10 @@ import uuid  # For unique CLIENT_ID
 import ssl  # For TLS
 
 # Configuration
-BROKER = "broker.emqx.io"  # EMQX public broker
+BROKER = "localhost"  # Private Mosquitto broker
 PORT = 8883  # TLS port
+USERNAME = "sensor_user"  # For publisher
+PASSWORD = "securepass123"  # Password
 CLIENT_ID = str(uuid.uuid4())  # Unique ID each run
 ENVIRONMENTS = ["house", "garden", "greenhouse"]
 SENSORS = ["light", "humidity", "ph"]
@@ -28,7 +30,8 @@ client = mqtt.Client(
     client_id=CLIENT_ID,
     protocol=mqtt.MQTTv5  # v5 for properties
 )
-client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2)  # Enable TLS (system CA certs)
+client.username_pw_set(USERNAME, PASSWORD)  # Auth
+client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE)  # Skip self-signed verification
 client.on_connect = on_connect  # Optional: For debug
 
 # Connect
@@ -100,7 +103,7 @@ try:
             for h in history.values()
         ) / 30
         print(f"📊 Avg Humidity Trend: {round(avg_humidity, 2)}")
-
+        
         time.sleep(60)  # Simulate slower interval for 90 sensors
 
 except KeyboardInterrupt:
