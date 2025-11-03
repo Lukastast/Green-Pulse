@@ -2,6 +2,9 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("kotlin-kapt")
+    id("com.google.gms.google-services")
+    id("dagger.hilt.android.plugin")
 }
 
 android {
@@ -40,7 +43,6 @@ android {
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -56,5 +58,29 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    implementation("androidx.compose.material:material-icons-extended")
 
+    //firebase
+    implementation(platform("com.google.firebase:firebase-bom:34.3.0"))
+    implementation(libs.firebase.auth)
+    implementation("com.google.firebase:firebase-firestore")
+
+    //google
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+
+    //hilt
+    implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
+    implementation("com.google.dagger:hilt-android:2.57.2")
+    implementation(libs.androidx.room.ktx)
+    kapt("com.google.dagger:hilt-compiler:2.57.2")
+
+    //MQTTT
+    implementation("com.github.hannesa2:paho.mqtt.android:4.4.2")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.compose.ui:ui:1.6.0")
+    implementation("androidx.compose.material3:material3:1.2.0")
+    implementation("androidx.compose.runtime:runtime-livedata:1.6.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 }
