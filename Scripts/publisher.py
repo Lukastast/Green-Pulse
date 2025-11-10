@@ -1,112 +1,169 @@
-import time
 import json
 import random
-import math
+import time
+import threading
+import ssl
+import uuid
 import paho.mqtt.client as mqtt
-from datetime import datetime
-from paho.mqtt.client import CallbackAPIVersion  # Correct import for VERSION2
-import uuid  # For unique CLIENT_ID
-import ssl  # For TLS
 
-# Configuration
-BROKER = "localhost"  # Private Mosquitto broker
-PORT = 8883  # TLS port
-USERNAME = "sensor_user"  # For publisher
-PASSWORD = "securepass123"  # Password
-CLIENT_ID = str(uuid.uuid4())  # Unique ID each run
-ENVIRONMENTS = ["house", "garden", "greenhouse"]
-SENSORS = ["light", "humidity", "ph"]
+# ---------------- MQTT CONFIG ---------------- #
+BROKER = "broker.emqx.io"
+PORT = 8883
+CLIENT_ID = f"greenpulse-sim-{uuid.uuid4()}"
+KEEPALIVE = 60
+TOPIC = "greenpulse/simulator"
 
-# Optional: Callback for connection status
-def on_connect(client, userdata, flags, reason_code, properties):
-    if reason_code == 0:
-        print("Connected successfully")
-    else:
-        print(f"Connection failed with reason: {reason_code}")
+# ---------------- PLANT DATA ---------------- #
+active_plants = {}
+update_interval = 10  # 10 seconds = 1 simulated hour
 
-# Create MQTT client with v2 callback API
-client = mqtt.Client(
-    callback_api_version=CallbackAPIVersion.VERSION2,
-    client_id=CLIENT_ID,
-    protocol=mqtt.MQTTv5  # v5 for properties
-)
-client.username_pw_set(USERNAME, PASSWORD)  # Auth
-client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE)  # Skip self-signed verification
-client.on_connect = on_connect  # Optional: For debug
+# How long (in simulated hours) a plant can survive bad conditions
+MAX_BAD_HOURS = 12  # i.e. 2 real minutes (12 * 10 seconds)
 
-# Connect
-client.connect(BROKER, PORT, keepalive=60)
-client.loop_start()
+# Default environment settings
+plant_types = {
+    "cactus": {"ideal_ph": 6.0, "min_hum": 20, "max_hum": 40, "dry_rate": 0.5},
+    "tropical": {"ideal_ph": 6.5, "min_hum": 60, "max_hum": 90, "dry_rate": 0.2},
+    "herb": {"ideal_ph": 6.8, "min_hum": 50, "max_hum": 80, "dry_rate": 0.3},
+    "default": {"ideal_ph": 6.5, "min_hum": 40, "max_hum": 70, "dry_rate": 0.3}
+}
 
-# Historical trends (simple dict for demo; use DB in production)
-history = {f"plant{i:02d}": {sensor: [] for sensor in SENSORS} for i in range(1, 31)}
+# ---------------- PLANT LOGIC ---------------- #
 
-try:
+def water_plant(plant_id, amount):
+    if plant_id in active_plants:
+        plant = active_plants[plant_id]
+        plant["humidity"] += amount * 100
+        if plant["humidity"] > 100:
+            plant["humidity"] = 100
+        print(f"💧 Watered {plant_id}. New humidity: {plant['humidity']:.1f}%")
+
+
+def regulate_ph(plant_id, target):
+    if plant_id in active_plants:
+        plant = active_plants[plant_id]
+        delta = target - plant["ph"]
+        plant["ph"] += delta * 0.5
+        print(f"⚗️ Regulated {plant_id} pH to {plant['ph']:.2f}")
+
+
+def update_plants(client):
+    """Simulate hourly changes in plant conditions."""
     while True:
-        for plant_id in range(1, 31):  # 30 plants
-            env = random.choice(ENVIRONMENTS)  # Random environment
-            for sensor in SENSORS:
-                # Daily cycle: Sine wave based on hour (0-23)
-                hour = datetime.now().hour
-                cycle_factor = math.sin(2 * math.pi * hour / 24)  # -1 to 1
+        to_remove = []
+        for plant_id, plant in list(active_plants.items()):
+            env = plant_types.get(plant["type"], plant_types["default"])
 
-                # Base values per env/sensor + randomization
-                if sensor == "light":
-                    base = {"house": 500, "garden": 2000, "greenhouse": 1000}[env]
-                    value = base + cycle_factor * 200 + random.uniform(-100, 100)
-                elif sensor == "humidity":
-                    base = {"house": 50, "garden": 70, "greenhouse": 60}[env]
-                    value = base + cycle_factor * 10 + random.uniform(-5, 5)
-                else:  # pH
-                    base = 6.0
-                    value = base + random.uniform(-0.5, 0.5)
+            # Skip dead plants
+            if not plant["alive"]:
+                continue
 
-                # Timestamp
-                timestamp = time.time()
+            # Simulate temperature impact on drying
+            temp_effect = (plant["temperature"] - 20) * 0.02
+            humidity_loss = (env["dry_rate"] + temp_effect) * random.uniform(0.8, 1.2)
+            plant["humidity"] -= humidity_loss
+            plant["humidity"] = max(0, plant["humidity"])
 
-                # Append to history
-                history_key = f"plant{plant_id:02d}"
-                history[history_key][sensor].append(value)
-                if len(history[history_key][sensor]) > 5:  # Keep last 5 for trend
-                    history[history_key][sensor] = history[history_key][sensor][-5:]
+            # Random pH drift
+            plant["ph"] += random.uniform(-0.05, 0.05)
+            plant["ph"] = max(4.0, min(8.0, plant["ph"]))
 
-                # Hysteresis/Prediction (only for humidity)
-                prediction = None
-                if sensor == "humidity":
-                    humidity_history = history[history_key]["humidity"]
-                    if len(humidity_history) > 0:  # Safe check, though always true after append
-                        trend = sum(humidity_history) / len(humidity_history)
-                        if trend < 40 and value < trend:
-                            prediction = "water in 2 hours"
+            # Check for bad conditions
+            bad = (
+                plant["humidity"] < env["min_hum"]
+                or plant["humidity"] > env["max_hum"]
+                or abs(plant["ph"] - env["ideal_ph"]) > 1.0
+            )
 
-                # Data payload
-                data = {
-                    "plantId": f"plant{plant_id:02d}",
-                    "environment": env,
-                    "sensor": sensor,
-                    "value": round(value, 2),
-                    "timestamp": timestamp,
-                    "prediction": prediction
+            if bad:
+                plant["bad_hours"] += 1
+                print(f"⚠️ {plant_id} is in bad condition ({plant['bad_hours']}h).")
+                if plant["bad_hours"] >= MAX_BAD_HOURS:
+                    plant["alive"] = False
+                    print(f"💀 {plant_id} has died after prolonged bad conditions.")
+                    client.publish(TOPIC, json.dumps({
+                        "event": "plant_dead",
+                        "plantId": plant_id
+                    }))
+            else:
+                plant["bad_hours"] = 0  # reset counter if back to normal
+
+            # Print status
+            status = "DEAD" if not plant["alive"] else "OK"
+            print(f"🌿 {plant_id} | Type: {plant['type']} | Humidity: {plant['humidity']:.1f}% | pH: {plant['ph']:.2f} | Temp: {plant['temperature']}°C | {status}")
+
+        time.sleep(update_interval)  # 1 hour passes every 10 seconds
+
+
+# ---------------- MQTT HANDLERS ---------------- #
+
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    print(f"✅ Connected to MQTT broker ({BROKER}) with code {reason_code}")
+    client.subscribe(TOPIC)
+
+
+def on_message(client, userdata, msg):
+    try:
+        payload = json.loads(msg.payload.decode())
+        action = payload.get("action")
+        plant_id = payload.get("plantId")
+
+        if not plant_id:
+            return
+
+        if action == "add_plant":
+            if plant_id not in active_plants:
+                plant_type = payload.get("type", "default")
+                environment = plant_types.get(plant_type, plant_types["default"])
+
+                active_plants[plant_id] = {
+                    "type": plant_type,
+                    "humidity": random.uniform(environment["min_hum"], environment["max_hum"]),
+                    "ph": random.uniform(6.0, 7.5),
+                    "temperature": random.uniform(18, 28),
+                    "bad_hours": 0,
+                    "alive": True
                 }
 
-                # Topic: Hierarchical for scalability
-                topic = f"greenpulse/{env}/{data['plantId']}/{sensor}"
+                print(f"🌱 Added new plant '{plant_id}' of type '{plant_type}'")
 
-                # Publish
-                payload = json.dumps(data)
-                client.publish(topic, payload, qos=1)
-                print(f"📡 Published to {topic}: {payload}")
+        elif action == "water":
+            amount = float(payload.get("amount", 0.3))
+            water_plant(plant_id, amount)
 
-        # Stats (demo: average humidity across plants, safe for empty lists)
-        avg_humidity = sum(
-            (sum(h["humidity"]) / len(h["humidity"]) if len(h["humidity"]) > 0 else 0)
-            for h in history.values()
-        ) / 30
-        print(f"📊 Avg Humidity Trend: {round(avg_humidity, 2)}")
-        
-        time.sleep(60)  # Simulate slower interval for 90 sensors
+        elif action == "set_ph":
+            target = float(payload.get("target", 6.5))
+            regulate_ph(plant_id, target)
 
-except KeyboardInterrupt:
-    print("Publisher stopped.")
-    client.loop_stop()
-    client.disconnect()
+        elif action == "set_temp":
+            temp = float(payload.get("temp", 22))
+            if plant_id in active_plants:
+                active_plants[plant_id]["temperature"] = temp
+                print(f"🌡️ Temperature for {plant_id} set to {temp}°C")
+
+    except Exception as e:
+        print(f"⚠️ Error in on_message: {e}")
+
+
+# ---------------- MAIN ---------------- #
+
+def main():
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, CLIENT_ID)
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    client.tls_set(cert_reqs=ssl.CERT_NONE)
+    client.tls_insecure_set(True)
+    client.connect(BROKER, PORT, KEEPALIVE)
+    client.loop_start()
+
+    # Start background simulation
+    threading.Thread(target=update_plants, args=(client,), daemon=True).start()
+
+    # Keep running
+    while True:
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main()
