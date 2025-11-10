@@ -1,5 +1,0 @@
-user sensor_user
-topic readwrite greenpulse/#  # Publishers can read/write all data
-user app_user
-topic read greenpulse/#  # Subscribers read data
-topic write greenpulse/commands/#  # Write predictions/commands
