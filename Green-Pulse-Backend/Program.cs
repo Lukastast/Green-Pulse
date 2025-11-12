@@ -2,20 +2,28 @@ using Green_Pulse_Backend.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Add services to the container
 builder.Services.AddControllers();
 
-// Registrer MQTT-servicen som singleton, så vi kan bruge dens state i controller
+// Register services
 builder.Services.AddSingleton<MqttSubscriberService>();
-builder.Services.AddHostedService(provider => provider.GetService<MqttSubscriberService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MqttSubscriberService>());
 
-// Tilføj Swagger
+builder.Services.AddSingleton<WateringService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WateringService>());
+
+builder.Services.AddSingleton<PlantControlService>();
+
+// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Brug Swagger
+// Initialize PlantControlService (for MQTT connection)
+var plantControlService = app.Services.GetRequiredService<PlantControlService>();
+await plantControlService.InitializeAsync();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -24,7 +32,5 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();

@@ -13,7 +13,7 @@ namespace Green_Pulse_Backend.Controllers
             _mqttService = mqttService;
         }
 
-        [HttpGet("messages")]
+        [HttpGet("subsribeToMqtt")]
         public IActionResult GetMessages()
         {
             return Ok(_mqttService.Messages);
