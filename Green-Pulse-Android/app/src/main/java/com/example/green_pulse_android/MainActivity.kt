@@ -27,6 +27,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.green_pulse_android.authorization.LoginScreen
 import com.example.green_pulse_android.authorization.SignupScreen
+import com.example.green_pulse_android.createplant.CreatePlantScreen
+import com.example.green_pulse_android.helpers.CREATE_PLANT_SCREEN
 import com.example.green_pulse_android.helpers.GreenPulseAppState
 import com.example.green_pulse_android.helpers.HOME_SCREEN
 import com.example.green_pulse_android.helpers.LOGIN_SCREEN
@@ -93,6 +95,12 @@ fun NavGraphBuilder.GreenPulseGraph(appState: GreenPulseAppState) {
         )
     }
 
+    composable(CREATE_PLANT_SCREEN) {
+        CreatePlantScreen(
+            onCreate = { newPlant -> /* Handle success, e.g., viewModel.addFromFirestore(newPlant) */; appState.navigate(PLANT_VIEW_SCREEN) },
+            onCancel = { appState.navigate(PLANT_VIEW_SCREEN) }
+        )
+    }
     composable(HOME_SCREEN) {
         HomeScreen(
             restartApp = { route -> appState.clearAndNavigate(route) },

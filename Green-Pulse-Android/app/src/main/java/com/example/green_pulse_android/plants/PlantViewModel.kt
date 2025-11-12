@@ -3,43 +3,75 @@ package com.example.green_pulse_android.plants
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import com.example.green_pulse_android.GreenPulseViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.green_pulse_android.firebase.PlantRepository
+import com.example.green_pulse_android.model.Plant
+import com.example.green_pulse_android.model.PlantStatus
+import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
+import dagger.hilt.android.lifecycle.HiltViewModel
 import info.mqtt.android.service.MqttAndroidClient
+import kotlinx.coroutines.launch
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.IMqttToken
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttMessage
-import java.security.SecureRandom
 import java.util.UUID
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
+import javax.inject.Inject
+import kotlin.random.Random
 
-data class Plant(val id: String, val type: String, var alive: Boolean = true)
-
-class PlantViewModel(private val context: Context) : GreenPulseViewModel() {
+@HiltViewModel
+class PlantViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val plantRepository: PlantRepository  // Inject repo for Firestore
+) : ViewModel() {
     private val gson = Gson()
-    private val _plantsByType = mutableStateMapOf<String, SnapshotStateList<Plant>>()
-    val plantsByType: Map<String, SnapshotStateList<Plant>> = _plantsByType
+    private val _plantsByEnvironment = mutableStateMapOf<String, SnapshotStateList<Plant>>()  // Group by environment
+    val plantsByEnvironment: Map<String, SnapshotStateList<Plant>> = _plantsByEnvironment
 
     private var mqttClient: MqttAndroidClient? = null
     private val handler = Handler(Looper.getMainLooper())
 
     init {
+        setupFirestoreListener()
         setupMqtt()
+    }
+
+    private fun setupFirestoreListener() {
+        val userId = FirebaseAuth.getInstance().currentUser?.uid ?: run {
+            Log.w("PlantViewModel", "No user logged in; skipping Firestore listen")
+            return
+        }
+        plantRepository.listenToPlants { firestorePlants ->
+            Log.d("PlantViewModel", "Firestore plants updated: ${firestorePlants.size}")
+            _plantsByEnvironment.clear()
+            firestorePlants.forEach { fsPlant ->
+                val localPlant = Plant(
+                    id = fsPlant.id,
+                    type = fsPlant.type,
+                    environment = fsPlant.environment,
+                    name = fsPlant.name,
+                    alive = fsPlant.alive,
+                    humidity = fsPlant.humidity,
+                    ph = fsPlant.ph,
+                    temperature = fsPlant.temperature
+                )
+                _plantsByEnvironment.getOrPut(fsPlant.environment) { mutableStateListOf() }.add(localPlant)
+            }
+        }
     }
 
     private fun setupMqtt() {
         val clientId = "greenpulse-viewer-${UUID.randomUUID()}"
-        val serverUri = "ssl://broker.emqx.io:8883"
+        val serverUri = "tcp://10.0.2.2:1883"  // Adjust for device/host IP
         val client = MqttAndroidClient(context, serverUri, clientId)
         mqttClient = client
 
@@ -56,13 +88,31 @@ class PlantViewModel(private val context: Context) : GreenPulseViewModel() {
                 val payloadStr = String(message?.payload ?: byteArrayOf())
                 handler.post {
                     try {
-                        @Suppress("UNCHECKED_CAST")
-                        val payloadMap = gson.fromJson(payloadStr, MutableMap::class.java) as MutableMap<String, Any>
-                        if (payloadMap["event"] == "plant_dead") {
-                            val plantId = payloadMap["plantId"] as String
-                            _plantsByType.forEach { (_, list) ->
-                                val plant = list.find { it.id == plantId }
-                                plant?.alive = false
+                        when {
+                            payloadStr.contains("\"event\":\"plant_dead\"") -> {
+                                @Suppress("UNCHECKED_CAST")
+                                val payloadMap = gson.fromJson(payloadStr, MutableMap::class.java) as MutableMap<String, Any>
+                                val plantId = payloadMap["plantId"] as String
+                                _plantsByEnvironment.values.forEach { list ->
+                                    val plant = list.find { it.id == plantId }
+                                    plant?.alive = false
+                                }
+                            }
+                            payloadStr.contains("\"event\":\"status\"") -> {
+                                val status = gson.fromJson(payloadStr, PlantStatus::class.java)
+                                _plantsByEnvironment.values.forEach { list ->
+                                    val plant = list.find { it.id == status.plantId }
+                                    plant?.let {
+                                        it.alive = status.alive
+                                        it.humidity = status.humidity
+                                        it.ph = status.ph
+                                        it.temperature = status.temperature
+                                        // Sync back to Firestore
+                                        viewModelScope.launch {
+                                            plantRepository.updatePlantStats(plant.id, status.humidity, status.ph, status.temperature, status.alive)
+                                        }
+                                    }
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -76,15 +126,8 @@ class PlantViewModel(private val context: Context) : GreenPulseViewModel() {
 
         val options = MqttConnectOptions().apply {
             isCleanSession = true
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-            })
-            val sslContext = SSLContext.getInstance("TLSv1.2").apply {
-                init(null, trustAllCerts, SecureRandom())
-            }
-            socketFactory = sslContext.socketFactory
+            userName = "admin"
+            password = "public".toCharArray()
         }
 
         client.connect(options, null, object : IMqttActionListener {
@@ -105,7 +148,7 @@ class PlantViewModel(private val context: Context) : GreenPulseViewModel() {
         })
     }
 
-    fun addPlant(type: String) {
+    fun addPlant(type: String, environment: String, name: String) {
         val plantId = UUID.randomUUID().toString()
         val payload = mapOf(
             "action" to "add_plant",
@@ -113,34 +156,17 @@ class PlantViewModel(private val context: Context) : GreenPulseViewModel() {
             "type" to type
         )
         publishMessage(payload)
-        _plantsByType.getOrPut(type) { mutableStateListOf() }.add(Plant(plantId, type))
-    }
-
-    fun waterPlant(plantId: String) {
-        val payload = mapOf(
-            "action" to "water",
-            "plantId" to plantId,
-            "amount" to 0.3
+        // Local add for immediate UI
+        val localPlant = Plant(
+            id = plantId,
+            type = type,
+            environment = environment,
+            name = name,
+            humidity = Random.nextFloat() * 40f + 40f,
+            ph = Random.nextFloat() * 1.5f + 6.0f,
+            temperature = Random.nextFloat() * 10f + 18f
         )
-        publishMessage(payload)
-    }
-
-    fun setPhPlant(plantId: String) {
-        val payload = mapOf(
-            "action" to "set_ph",
-            "plantId" to plantId,
-            "target" to 6.5
-        )
-        publishMessage(payload)
-    }
-
-    fun setTempPlant(plantId: String) {
-        val payload = mapOf(
-            "action" to "set_temp",
-            "plantId" to plantId,
-            "temp" to 22.0
-        )
-        publishMessage(payload)
+        _plantsByEnvironment.getOrPut(environment) { mutableStateListOf() }.add(localPlant)
     }
 
     private fun publishMessage(payload: Map<String, Any>) {
@@ -165,15 +191,5 @@ class PlantViewModel(private val context: Context) : GreenPulseViewModel() {
             println("⚠️ Disconnect error: ${e.message}")
         }
         mqttClient = null
-    }
-}
-
-class PlantViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(PlantViewModel::class.java)) {
-            return PlantViewModel(context) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

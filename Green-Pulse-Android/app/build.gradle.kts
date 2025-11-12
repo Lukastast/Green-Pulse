@@ -61,7 +61,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     //firebase
-    implementation(platform("com.google.firebase:firebase-bom:34.3.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.5.0"))
     implementation(libs.firebase.auth)
     implementation("com.google.firebase:firebase-firestore")
 
@@ -82,5 +82,5 @@ dependencies {
     implementation("androidx.compose.ui:ui:1.6.0")
     implementation("androidx.compose.material3:material3:1.2.0")
     implementation("androidx.compose.runtime:runtime-livedata:1.6.0")
-    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.google.code.gson:gson:2.13.2")
 }

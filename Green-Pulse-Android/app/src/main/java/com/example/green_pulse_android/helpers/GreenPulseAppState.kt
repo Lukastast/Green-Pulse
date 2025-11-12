@@ -3,6 +3,9 @@ package com.example.green_pulse_android.helpers
 import androidx.compose.runtime.Stable
 import androidx.navigation.NavHostController
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
@@ -30,8 +33,11 @@ import kotlinx.coroutines.launch
         fun navigate(route: String) {
             navController.navigate(route) { launchSingleTop = true }
         }
+        @Composable
         fun shouldShowBottomBar(): Boolean {
-            val currentRoute = navController.currentDestination?.route
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentDestination = navBackStackEntry?.destination
+            val currentRoute = currentDestination?.route
             return currentRoute !in listOf(SPLASH_SCREEN, LOGIN_SCREEN, SIGNUP_SCREEN)
         }
 
