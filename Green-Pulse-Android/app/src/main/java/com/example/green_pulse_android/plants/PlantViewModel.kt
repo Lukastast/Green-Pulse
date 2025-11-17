@@ -4,18 +4,20 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.green_pulse_android.firebase.PlantRepository
+import com.example.green_pulse_android.model.FirestorePlant
 import com.example.green_pulse_android.model.Plant
 import com.example.green_pulse_android.model.PlantStatus
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import info.mqtt.android.service.MqttAndroidClient
 import kotlinx.coroutines.launch
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
@@ -36,7 +38,8 @@ class PlantViewModel @Inject constructor(
     private val gson = Gson()
     private val _plantsByEnvironment = mutableStateMapOf<String, SnapshotStateList<Plant>>()  // Group by environment
     val plantsByEnvironment: Map<String, SnapshotStateList<Plant>> = _plantsByEnvironment
-
+    private val _isLoading = mutableStateOf(true)
+    val isLoading = _isLoading
     private var mqttClient: MqttAndroidClient? = null
     private val handler = Handler(Looper.getMainLooper())
 
@@ -48,6 +51,7 @@ class PlantViewModel @Inject constructor(
     private fun setupFirestoreListener() {
         val userId = FirebaseAuth.getInstance().currentUser?.uid ?: run {
             Log.w("PlantViewModel", "No user logged in; skipping Firestore listen")
+            _isLoading.value = false
             return
         }
         plantRepository.listenToPlants { firestorePlants ->
@@ -66,9 +70,17 @@ class PlantViewModel @Inject constructor(
                 )
                 _plantsByEnvironment.getOrPut(fsPlant.environment) { mutableStateListOf() }.add(localPlant)
             }
+            _isLoading.value = false
         }
     }
 
+    public fun refreshPlants() {
+        val userId = FirebaseAuth.getInstance().currentUser?.uid
+        if (userId != null) {
+            // Trigger a manual query or just log to verify listener
+            Log.d("PlantViewModel", "Manual refresh triggered for user $userId")
+        }
+    }
     private fun setupMqtt() {
         val clientId = "greenpulse-viewer-${UUID.randomUUID()}"
         val serverUri = "tcp://10.0.2.2:1883"  // Adjust for device/host IP
@@ -107,9 +119,16 @@ class PlantViewModel @Inject constructor(
                                         it.humidity = status.humidity
                                         it.ph = status.ph
                                         it.temperature = status.temperature
-                                        // Sync back to Firestore
+                                        // Sync back to Firestore in coroutine
                                         viewModelScope.launch {
-                                            plantRepository.updatePlantStats(plant.id, status.humidity, status.ph, status.temperature, status.alive)
+                                            plantRepository.updatePlantStats(
+                                                plant.id,
+                                                plant.environment,
+                                                status.humidity,
+                                                status.ph,
+                                                status.temperature,
+                                                status.alive
+                                            )
                                         }
                                     }
                                 }
@@ -148,25 +167,42 @@ class PlantViewModel @Inject constructor(
         })
     }
 
+    // Full addPlant function
     fun addPlant(type: String, environment: String, name: String) {
-        val plantId = UUID.randomUUID().toString()
-        val payload = mapOf(
-            "action" to "add_plant",
-            "plantId" to plantId,
-            "type" to type
-        )
-        publishMessage(payload)
-        // Local add for immediate UI
-        val localPlant = Plant(
-            id = plantId,
-            type = type,
-            environment = environment,
-            name = name,
-            humidity = Random.nextFloat() * 40f + 40f,
-            ph = Random.nextFloat() * 1.5f + 6.0f,
-            temperature = Random.nextFloat() * 10f + 18f
-        )
-        _plantsByEnvironment.getOrPut(environment) { mutableStateListOf() }.add(localPlant)
+        viewModelScope.launch {
+            val plantId = UUID.randomUUID().toString()
+            val payload = mapOf(
+                "action" to "add_plant",
+                "plantId" to plantId,
+                "type" to type
+            )
+            publishMessage(payload)
+
+            // Create in Firestore first
+            val firestorePlant = FirestorePlant(
+                id = plantId,
+                name = name,
+                type = type,
+                environment = environment
+            )
+            val result = plantRepository.createPlant(firestorePlant, environment)
+            if (result.isSuccess) {
+                // Local add for immediate UI
+                val localPlant = Plant(
+                    id = plantId,
+                    type = type,
+                    environment = environment,
+                    name = name,
+                    humidity = Random.nextFloat() * 40f + 40f,
+                    ph = Random.nextFloat() * 1.5f + 6.0f,
+                    temperature = Random.nextFloat() * 10f + 18f
+                )
+                _plantsByEnvironment.getOrPut(environment) { mutableStateListOf() }.add(localPlant)
+                Log.d("PlantViewModel", "Plant added successfully to Firestore and UI")
+            } else {
+                Log.e("PlantViewModel", "Failed to add plant to Firestore", result.exceptionOrNull())
+            }
+        }
     }
 
     private fun publishMessage(payload: Map<String, Any>) {

@@ -1,7 +1,9 @@
 package com.example.green_pulse_android
 
+import android.util.Log
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocalFlorist
 import androidx.compose.material3.Icon
@@ -21,10 +23,12 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.green_pulse_android.authorization.LoginScreen
 import com.example.green_pulse_android.authorization.SignupScreen
 import com.example.green_pulse_android.createplant.CreatePlantScreen
@@ -32,11 +36,13 @@ import com.example.green_pulse_android.helpers.CREATE_PLANT_SCREEN
 import com.example.green_pulse_android.helpers.GreenPulseAppState
 import com.example.green_pulse_android.helpers.HOME_SCREEN
 import com.example.green_pulse_android.helpers.LOGIN_SCREEN
+import com.example.green_pulse_android.helpers.PLANT_DASHBOARD_SCREEN
 import com.example.green_pulse_android.helpers.PLANT_VIEW_SCREEN
 import com.example.green_pulse_android.helpers.SIGNUP_SCREEN
 import com.example.green_pulse_android.helpers.SPLASH_SCREEN
 import com.example.green_pulse_android.helpers.SnackbarManager
-import com.example.green_pulse_android.plants.HomeScreen
+import com.example.green_pulse_android.home.HomeScreen
+import com.example.green_pulse_android.plants.PlantHistoryDashboardScreen
 import com.example.green_pulse_android.plants.PlantViewScreen
 import com.example.green_pulse_android.splash.SplashScreen
 import com.example.green_pulse_android.ui.theme.GreenPulseAndroidTheme
@@ -95,9 +101,17 @@ fun NavGraphBuilder.GreenPulseGraph(appState: GreenPulseAppState) {
         )
     }
 
-    composable(CREATE_PLANT_SCREEN) {
+    composable(
+        "$CREATE_PLANT_SCREEN/{environment}",
+        arguments = listOf(navArgument("environment") { type = NavType.StringType })
+    ) { backStackEntry ->
+        val environment = backStackEntry.arguments?.getString("environment") ?: "Indoors"
         CreatePlantScreen(
-            onCreate = { newPlant -> /* Handle success, e.g., viewModel.addFromFirestore(newPlant) */; appState.navigate(PLANT_VIEW_SCREEN) },
+            environment = environment,  // Pass to screen
+            onCreate = { newPlant ->
+                // Refresh or navigate back
+                appState.navigate(PLANT_VIEW_SCREEN)
+            },
             onCancel = { appState.navigate(PLANT_VIEW_SCREEN) }
         )
     }
@@ -110,6 +124,24 @@ fun NavGraphBuilder.GreenPulseGraph(appState: GreenPulseAppState) {
 
     composable(SIGNUP_SCREEN) {
         SignupScreen(openAndPopUp = { route, popUp -> appState.navigateAndPopUp(route, popUp) })
+    }
+
+
+    composable(
+        "$PLANT_DASHBOARD_SCREEN/{environment}/{plantId}",
+        arguments = listOf(
+            navArgument("environment") { type = NavType.StringType },
+            navArgument("plantId") { type = NavType.StringType }
+        )
+    ) { backStackEntry ->
+        val environment = backStackEntry.arguments?.getString("environment") ?: "Indoors"
+        val plantId = backStackEntry.arguments?.getString("plantId") ?: ""
+        Log.d("NavDebug", "Resolved args: env='$environment', id='$plantId'")
+        PlantHistoryDashboardScreen(
+            onBack = { appState.navigate(PLANT_VIEW_SCREEN) },
+            environment = environment,
+            plantId = plantId
+        )
     }
 
     composable(SPLASH_SCREEN) {

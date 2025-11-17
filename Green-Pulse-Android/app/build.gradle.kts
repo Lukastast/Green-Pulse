@@ -76,6 +76,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     kapt("com.google.dagger:hilt-compiler:2.57.2")
 
+    //charts
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+
     //MQTTT
     implementation("com.github.hannesa2:paho.mqtt.android:4.4.2")
     implementation("androidx.work:work-runtime-ktx:2.10.0")

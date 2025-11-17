@@ -32,15 +32,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.green_pulse_android.model.FirestorePlant
+import com.example.green_pulse_android.plants.PlantViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreatePlantScreen(
+    environment: String,
     onCreate: (FirestorePlant) -> Unit,
     onCancel: () -> Unit,
     viewModel: CreatePlantViewModel = hiltViewModel()
@@ -48,11 +49,8 @@ fun CreatePlantScreen(
     val coroutineScope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
     var type by remember { mutableStateOf("herb") }
-    var environment by remember { mutableStateOf("Indoors") }
     val types = listOf("Basil", "cactus", "tropical")
-    val envs = listOf("Indoors", "Outdoors", "Greenhouse")
     var expandedType by remember { mutableStateOf(false) }
-    var expandedEnv by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -133,58 +131,29 @@ fun CreatePlantScreen(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Environment Dropdown
-                ExposedDropdownMenuBox(
-                    expanded = expandedEnv,
-                    onExpandedChange = { expandedEnv = !expandedEnv }
-                ) {
-                    OutlinedTextField(
-                        value = environment,
-                        onValueChange = { },
-                        readOnly = true,
-                        label = { Text("Environment") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedEnv) },
-                        modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expandedEnv,
-                        onDismissRequest = { expandedEnv = false }
-                    ) {
-                        envs.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option) },
-                                onClick = {
-                                    environment = option
-                                    expandedEnv = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onCancel) { Text("Cancel") }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            coroutineScope.launch {
-                                val newPlant = FirestorePlant(
-                                    name = name,
-                                    type = type,
-                                    environment = environment
-                                )
-                                viewModel.createPlant(newPlant) { successPlant ->
-                                    if (successPlant != null) onCreate(successPlant)
-                                }
-                            }
+                    Button(onClick = {
+                        coroutineScope.launch {
+                            val newPlant = FirestorePlant(
+                                name = name,
+                                type = type,
+                                environment = environment
+                            )
+                            viewModel.createPlant(newPlant, environment,
+                                onResult = { successPlant ->
+                                    if (successPlant != null) {
+                                        onCreate(successPlant)
+                                    }
+                                },
+                                onSuccessRefresh = {}
+                            ) { }
                         }
-                    ) {
+                    }) {
                         Text("Create")
                     }
                 }
