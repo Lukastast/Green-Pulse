@@ -13,7 +13,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.green_pulse_android.firebase.PlantRepository
 import com.example.green_pulse_android.model.FirestorePlant
 import com.example.green_pulse_android.model.Plant
-import com.example.green_pulse_android.model.PlantStatus
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,8 +41,10 @@ class PlantViewModel @Inject constructor(
     val isLoading = _isLoading
     private var mqttClient: MqttAndroidClient? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var isConnecting = false  // Prevent multiple connects
 
     init {
+        Log.d("PlantViewModel", "🔧 ViewModel initialized - starting MQTT setup")
         setupFirestoreListener()
         setupMqtt()
     }
@@ -81,93 +82,113 @@ class PlantViewModel @Inject constructor(
             Log.d("PlantViewModel", "Manual refresh triggered for user $userId")
         }
     }
+
     private fun setupMqtt() {
-        val clientId = "greenpulse-viewer-${UUID.randomUUID()}"
-        val serverUri = "tcp://10.0.2.2:1883"  // Adjust for device/host IP
+        if (isConnecting) return
+        isConnecting = true
+
+        val clientId = "greenpulse-android-${UUID.randomUUID()}"  // Unique for Android client
+        val serverUri = "tcp://10.42.131.124:1883"  // CHANGE: Use 1883 for MQTT (unsecured). Replace IP with your broker's actual IP
+        // For TLS: "ssl://10.42.131.124:8883" and add .setSocketFactory(sslContext.socketFactory) to options
+
         val client = MqttAndroidClient(context, serverUri, clientId)
         mqttClient = client
 
         client.setCallback(object : MqttCallbackExtended {
             override fun connectComplete(reconnect: Boolean, serverURI: String?) {
-                println("✅ Connected to MQTT broker")
+                Log.d("MQTT", "✅ Connected to MQTT broker (reconnect: $reconnect)")
+                isConnecting = false
+                // Subscribe after connect
+                subscribeToTopics()
             }
 
             override fun connectionLost(cause: Throwable?) {
-                println("⚠️ Connection lost: ${cause?.message}")
+                Log.w("MQTT", "⚠️ Connection lost: ${cause?.message}")
+                isConnecting = false
+                // Simple reconnect retry after 5s
+                handler.postDelayed({ setupMqtt() }, 5000)
             }
 
             override fun messageArrived(topic: String?, message: MqttMessage?) {
                 val payloadStr = String(message?.payload ?: byteArrayOf())
+                Log.d("MQTT", "📨 Received on $topic: $payloadStr")
                 handler.post {
                     try {
-                        when {
-                            payloadStr.contains("\"event\":\"plant_dead\"") -> {
-                                @Suppress("UNCHECKED_CAST")
-                                val payloadMap = gson.fromJson(payloadStr, MutableMap::class.java) as MutableMap<String, Any>
-                                val plantId = payloadMap["plantId"] as String
-                                _plantsByEnvironment.values.forEach { list ->
-                                    val plant = list.find { it.id == plantId }
-                                    plant?.alive = false
-                                }
+                        val data = gson.fromJson(payloadStr, Map::class.java) as Map<String, Any>
+                        val plantId = data["plantId"] as String
+                        val sensor = data["sensor"] as String
+                        val value = (data["value"] as Number).toFloat()
+                        val environment = data["environment"] as String
+                        val prediction = data["prediction"] as? String  // Optional: Handle "water in 2 hours"
+
+                        // Find and update plant
+                        val plantList = _plantsByEnvironment[environment]
+                        val plant = plantList?.find { it.id == plantId }
+                        plant?.let {
+                            when (sensor) {
+                                "humidity" -> it.humidity = value
+                                "ph" -> it.ph = value
+                                "light" -> it.temperature = value  // Reuse temp for light if no field; add if needed
+                                // Add "temperature" sensor if publisher sends it
                             }
-                            payloadStr.contains("\"event\":\"status\"") -> {
-                                val status = gson.fromJson(payloadStr, PlantStatus::class.java)
-                                _plantsByEnvironment.values.forEach { list ->
-                                    val plant = list.find { it.id == status.plantId }
-                                    plant?.let {
-                                        it.alive = status.alive
-                                        it.humidity = status.humidity
-                                        it.ph = status.ph
-                                        it.temperature = status.temperature
-                                        // Sync back to Firestore in coroutine
-                                        viewModelScope.launch {
-                                            plantRepository.updatePlantStats(
-                                                plant.id,
-                                                plant.environment,
-                                                status.humidity,
-                                                status.ph,
-                                                status.temperature,
-                                                status.alive
-                                            )
-                                        }
-                                    }
-                                }
+                            if (!it.alive) it.alive = true  // Assume alive unless dead event
+
+                            // Optional: Handle prediction (e.g., show alert)
+                            if (prediction != null) {
+                                Log.d("MQTT", "Prediction for $plantId: $prediction")
+                                // TODO: Update UI state for alerts
                             }
-                        }
+
+                            // Sync to Firestore
+                            viewModelScope.launch {
+                                plantRepository.updatePlantStats(
+                                    plant.id, environment, it.humidity, it.ph, it.temperature, it.alive
+                                )
+                            }
+                        } ?: Log.w("MQTT", "Plant $plantId not found in UI")
                     } catch (e: Exception) {
-                        println("⚠️ Error parsing message: ${e.message}")
+                        Log.e("MQTT", "⚠️ Error parsing message: ${e.message}")
                     }
                 }
             }
 
-            override fun deliveryComplete(token: IMqttDeliveryToken?) {}
+            override fun deliveryComplete(token: IMqttDeliveryToken?) {
+                // Not used for subscribe
+            }
         })
 
         val options = MqttConnectOptions().apply {
             isCleanSession = true
-            userName = "admin"
-            password = "public".toCharArray()
+            connectionTimeout = 10
+            keepAliveInterval = 20
+            userName = "app_user"  // CHANGE: Use ACL user for subscribe
+            password = "your_app_user_password".toCharArray()  // CHANGE: Set actual password
+            // For TLS: Add SSLContext setup if using ssl:// URI
         }
 
         client.connect(options, null, object : IMqttActionListener {
             override fun onSuccess(asyncActionToken: IMqttToken?) {
-                println("✅ Connection successful")
-                client.subscribe("greenpulse/simulator", 0, null, object : IMqttActionListener {
-                    override fun onSuccess(arg0: IMqttToken?) {
-                        println("✅ Subscribed to topic")
-                    }
-                    override fun onFailure(arg0: IMqttToken?, arg1: Throwable?) {
-                        println("⚠️ Subscription failed: ${arg1?.message}")
-                    }
-                })
+                Log.d("MQTT", "✅ Connection successful")
             }
             override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                println("⚠️ Connection failed: ${exception?.message}")
+                Log.e("MQTT", "⚠️ Connection failed: ${exception?.message}")
+                isConnecting = false
             }
         })
     }
 
-    // Full addPlant function
+    private fun subscribeToTopics() {
+        mqttClient?.subscribe("greenpulse/#", 1, null, object : IMqttActionListener {  // QoS 1, wildcard for all
+            override fun onSuccess(arg0: IMqttToken?) {
+                Log.d("MQTT", "✅ Subscribed to greenpulse/#")
+            }
+            override fun onFailure(arg0: IMqttToken?, arg1: Throwable?) {
+                Log.e("MQTT", "⚠️ Subscription failed: ${arg1?.message}")
+            }
+        })
+    }
+
+    // Full addPlant function (unchanged, but now uses correct publish if needed)
     fun addPlant(type: String, environment: String, name: String) {
         viewModelScope.launch {
             val plantId = UUID.randomUUID().toString()
@@ -208,13 +229,14 @@ class PlantViewModel @Inject constructor(
     private fun publishMessage(payload: Map<String, Any>) {
         val message = MqttMessage().apply {
             this.payload = gson.toJson(payload).toByteArray()
+            qos = 1
         }
-        mqttClient?.publish("greenpulse/simulator", message, null, object : IMqttActionListener {
+        mqttClient?.publish("greenpulse/commands/#", message, null, object : IMqttActionListener {  // CHANGE: Use commands topic per ACL
             override fun onSuccess(asyncActionToken: IMqttToken?) {
-                println("✅ Published: ${payload["action"]}")
+                Log.d("MQTT", "✅ Published: ${payload["action"]}")
             }
             override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                println("⚠️ Publish failed: ${exception?.message}")
+                Log.e("MQTT", "⚠️ Publish failed: ${exception?.message}")
             }
         })
     }
@@ -224,7 +246,7 @@ class PlantViewModel @Inject constructor(
         try {
             mqttClient?.disconnectForcibly(1000, 1000)
         } catch (e: Exception) {
-            println("⚠️ Disconnect error: ${e.message}")
+            Log.e("MQTT", "⚠️ Disconnect error: ${e.message}")
         }
         mqttClient = null
     }
