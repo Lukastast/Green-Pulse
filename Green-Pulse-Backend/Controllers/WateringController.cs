@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Green_Pulse_Backend.Services;
 
 namespace Green_Pulse_Backend.Controllers
 {
@@ -7,7 +6,7 @@ namespace Green_Pulse_Backend.Controllers
     [Route("api/watering")]
     public class WateringController : ControllerBase
     {
-        private readonly WateringService _wateringService;
+        /* private readonly WateringService _wateringService;
 
         public WateringController(WateringService wateringService)
         {
@@ -28,7 +27,7 @@ namespace Green_Pulse_Backend.Controllers
                 .ToList();
 
             return Ok(plantsToWater);
-        }
+        } */
 
     }
 }
