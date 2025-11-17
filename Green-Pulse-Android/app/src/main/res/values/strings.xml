@@ -11,7 +11,8 @@
     <string name="sign_up_description">Don\'t have an account? Click here to Sign Up!</string>
     <string name="sign_out">Sign out</string>
     <string name="sign_out_title">Sign out?</string>
-    <string name="sign_out_description">You will have to sign in again to see your notes.</string>
+    <string name="sign_out_description">You will have to sign in again.</string>
+    <string name="login_description">Already have an account? Click here to Login!</string>
     <string name="delete_account">Delete account</string>
     <string name="delete_account_title">Delete account?</string>
     <string name="delete_account_description">You will lose all your notes and your account will be deleted. This action is irreversible.</string>

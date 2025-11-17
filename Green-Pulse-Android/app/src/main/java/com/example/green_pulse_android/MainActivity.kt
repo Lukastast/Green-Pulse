@@ -3,7 +3,6 @@ package com.example.green_pulse_android
 import android.util.Log
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocalFlorist
 import androidx.compose.material3.Icon
@@ -123,7 +122,9 @@ fun NavGraphBuilder.GreenPulseGraph(appState: GreenPulseAppState) {
     }
 
     composable(SIGNUP_SCREEN) {
-        SignupScreen(openAndPopUp = { route, popUp -> appState.navigateAndPopUp(route, popUp) })
+        SignupScreen(
+            openScreen = { route -> appState.navigate(route) },
+            openAndPopUp = { route, popUp -> appState.navigateAndPopUp(route, popUp) })
     }
 
 
