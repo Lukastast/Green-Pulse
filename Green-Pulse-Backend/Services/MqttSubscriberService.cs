@@ -1,3 +1,4 @@
+using Google.Cloud.Firestore;
 using MQTTnet;
 using MQTTnet.Protocol;
 using System.Security.Authentication;
@@ -9,18 +10,22 @@ namespace GreenPulse.Services
     public class MqttSubscriberService : BackgroundService
     {
         private readonly ILogger<MqttSubscriberService> _logger;
+        private readonly FirestoreDb _firestore;
         private IMqttClient? _mqttClient;
-        
-        // MQTT Configuration
-        private const string BROKER = "localhost";  // Change to "10.42.131.124" if running outside the broker machine
+
+        // MQTT Config
+        private const string BROKER = "localhost"; 
         private const int PORT = 8883;
         private const string USERNAME = "app_user";
         private const string PASSWORD = "appsecure456";
         private const string TOPIC = "greenpulse/#";
 
-        public MqttSubscriberService(ILogger<MqttSubscriberService> logger)
+        public MqttSubscriberService(
+            ILogger<MqttSubscriberService> logger,
+            FirestoreDb firestore)
         {
             _logger = logger;
+            _firestore = firestore;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -28,8 +33,7 @@ namespace GreenPulse.Services
             try
             {
                 await ConnectToMqttBroker(stoppingToken);
-                
-                // Keep the service running
+
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     await Task.Delay(1000, stoppingToken);
@@ -37,7 +41,7 @@ namespace GreenPulse.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in MQTT Subscriber Service");
+                _logger.LogError(ex, "MQTT Service crashed");
             }
         }
 
@@ -46,12 +50,11 @@ namespace GreenPulse.Services
             var factory = new MqttClientFactory();
             _mqttClient = factory.CreateMqttClient();
 
-            // Configure MQTT options for MQTTnet 5.x
             var tlsOptions = new MqttClientTlsOptions
             {
                 UseTls = true,
                 SslProtocol = SslProtocols.Tls12 | SslProtocols.Tls13,
-                CertificateValidationHandler = _ => true  // Skip certificate validation for self-signed certs
+                CertificateValidationHandler = _ => true
             };
 
             var options = new MqttClientOptionsBuilder()
@@ -64,49 +67,41 @@ namespace GreenPulse.Services
                 .WithTlsOptions(tlsOptions)
                 .Build();
 
-            // Set up message handler
             _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
 
-            // Set up connection handler
             _mqttClient.ConnectedAsync += async e =>
             {
-                _logger.LogInformation("✅ Connected to MQTT broker at {Broker}:{Port}", BROKER, PORT);
+                _logger.LogInformation("✅ MQTT connected to {Broker}:{Port}", BROKER, PORT);
 
-                // Subscribe to topics (MQTTnet 5.x API)
                 var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                    .WithTopicFilter(f => f
-                        .WithTopic(TOPIC)
-                        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
+                    .WithTopicFilter(f => f.WithTopic(TOPIC).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
                     .Build();
 
                 await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
-
-                _logger.LogInformation("📡 Subscribed to topic: {Topic}", TOPIC);
+                _logger.LogInformation("📡 Subscribed to MQTT topic: {Topic}", TOPIC);
             };
 
-            // Set up disconnection handler
             _mqttClient.DisconnectedAsync += async e =>
             {
-                _logger.LogWarning("❌ Disconnected from MQTT broker. Reason: {Reason}", e.Reason);
-                
+                _logger.LogWarning("❌ MQTT disconnected. Reason: {Reason}", e.Reason);
+
                 if (!stoppingToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Attempting to reconnect in 5 seconds...");
-                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-                    
+                    _logger.LogInformation("Reconnecting in 5 seconds...");
+                    await Task.Delay(5000, stoppingToken);
+
                     try
                     {
                         await _mqttClient.ConnectAsync(options, stoppingToken);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Reconnection failed");
+                        _logger.LogError(ex, "Reconnection failed.");
                     }
                 }
             };
 
-            // Connect to broker
-            _logger.LogInformation("Connecting to MQTT broker at {Broker}:{Port}...", BROKER, PORT);
+            _logger.LogInformation("Connecting to MQTT broker...");
             await _mqttClient.ConnectAsync(options, stoppingToken);
         }
 
@@ -114,129 +109,113 @@ namespace GreenPulse.Services
         {
             try
             {
-                var payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                var topic = e.ApplicationMessage.Topic;
+                string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
+                string topic = e.ApplicationMessage.Topic;
 
-                _logger.LogInformation("📨 Received message on {Topic}", topic);
+                _logger.LogInformation("📨 Incoming MQTT message on {Topic}", topic);
+                _logger.LogInformation("Payload: {Payload}", payload);
 
-                // Parse JSON payload
-                using var jsonDoc = JsonDocument.Parse(payload);
-                var eventType = jsonDoc.RootElement.GetProperty("event").GetString();
+                using var json = JsonDocument.Parse(payload);
+                string eventType = json.RootElement.GetProperty("event").GetString()!;
 
-                // Handle different event types
                 switch (eventType)
                 {
                     case "sensor_update":
-                        HandleSensorUpdate(jsonDoc.RootElement);
+                        _ = SaveSensorUpdate(json.RootElement);
                         break;
-                    
+
                     case "plant_added":
-                        HandlePlantAdded(jsonDoc.RootElement);
+                        _ = SaveEventLog("plant_added", json.RootElement);
                         break;
-                    
+
                     case "plant_watered":
-                        HandlePlantWatered(jsonDoc.RootElement);
+                        _ = SaveEventLog("plant_watered", json.RootElement);
                         break;
-                    
+
                     case "ph_adjusted":
-                        HandlePhAdjusted(jsonDoc.RootElement);
+                        _ = SaveEventLog("ph_adjusted", json.RootElement);
                         break;
-                    
+
                     case "temp_adjusted":
-                        HandleTempAdjusted(jsonDoc.RootElement);
+                        _ = SaveEventLog("temp_adjusted", json.RootElement);
                         break;
-                    
+
                     case "plant_dead":
-                        HandlePlantDead(jsonDoc.RootElement);
+                        _ = SaveEventLog("plant_dead", json.RootElement);
                         break;
-                    
-                    case "simulator_started":
-                        HandleSimulatorStarted(jsonDoc.RootElement);
-                        break;
-                    
+
                     default:
-                        _logger.LogWarning("Unknown event type: {EventType}", eventType);
+                        _logger.LogWarning("⚠ Unknown event: {EventType}", eventType);
                         break;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing MQTT message");
+                _logger.LogError(ex, "Error reading MQTT message");
             }
 
             return Task.CompletedTask;
         }
 
-        private void HandleSensorUpdate(JsonElement data)
+        // ---------------------------
+        // FIRESTORE SAVE FUNCTIONS
+        // ---------------------------
+
+        private async Task SaveSensorUpdate(JsonElement data)
         {
-            var plantId = data.GetProperty("plantId").GetString();
-            var humidity = data.GetProperty("humidity").GetDouble();
-            var ph = data.GetProperty("ph").GetDouble();
-            var temperature = data.GetProperty("temperature").GetDouble();
-            var alive = data.GetProperty("alive").GetBoolean();
+            try
+            {
+                string plantId = data.GetProperty("plantId").GetString()!;
+                double humidity = data.GetProperty("humidity").GetDouble();
+                double ph = data.GetProperty("ph").GetDouble();
+                double temp = data.GetProperty("temperature").GetDouble();
+                bool alive = data.GetProperty("alive").GetBoolean();
 
-            _logger.LogInformation(
-                "🌱 Sensor Update - Plant: {PlantId}, Humidity: {Humidity}%, pH: {Ph}, Temp: {Temp}°C, Alive: {Alive}",
-                plantId, humidity, ph, temperature, alive
-            );
+                var docRef = _firestore
+                    .Collection("plants")
+                    .Document(plantId)
+                    .Collection("sensor_updates")
+                    .Document(); // auto-ID
 
-            // TODO: Store in database or update application state
+                await docRef.SetAsync(new
+                {
+                    plantId,
+                    humidity,
+                    ph,
+                    temperature = temp,
+                    alive,
+                    timestamp = Timestamp.GetCurrentTimestamp()
+                });
+
+                _logger.LogInformation("🔥 Saved sensor update for plant {PlantId}", plantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save sensor update");
+            }
         }
 
-        private void HandlePlantAdded(JsonElement data)
+        private async Task SaveEventLog(string type, JsonElement data)
         {
-            var plantId = data.GetProperty("plantId").GetString();
-            var type = data.GetProperty("type").GetString();
-            
-            _logger.LogInformation("🌱 New plant added: {PlantId} ({Type})", plantId, type);
-            
-            // TODO: Add plant to database
-        }
+            try
+            {
+                var docRef = _firestore
+                    .Collection("event_logs")
+                    .Document();
 
-        private void HandlePlantWatered(JsonElement data)
-        {
-            var plantId = data.GetProperty("plantId").GetString();
-            var humidity = data.GetProperty("humidity").GetDouble();
-            
-            _logger.LogInformation("💧 Plant watered: {PlantId}, New humidity: {Humidity}%", plantId, humidity);
-            
-            // TODO: Log watering event
-        }
+                await docRef.SetAsync(new
+                {
+                    type,
+                    data = JsonSerializer.Deserialize<object>(data.GetRawText()),
+                    timestamp = Timestamp.GetCurrentTimestamp()
+                });
 
-        private void HandlePhAdjusted(JsonElement data)
-        {
-            var plantId = data.GetProperty("plantId").GetString();
-            var ph = data.GetProperty("ph").GetDouble();
-            
-            _logger.LogInformation("⚗️ pH adjusted: {PlantId}, New pH: {Ph}", plantId, ph);
-            
-            // TODO: Log pH adjustment
-        }
-
-        private void HandleTempAdjusted(JsonElement data)
-        {
-            var plantId = data.GetProperty("plantId").GetString();
-            var temp = data.GetProperty("temperature").GetDouble();
-            
-            _logger.LogInformation("🌡️ Temperature adjusted: {PlantId}, New temp: {Temp}°C", plantId, temp);
-            
-            // TODO: Log temperature adjustment
-        }
-
-        private void HandlePlantDead(JsonElement data)
-        {
-            var plantId = data.GetProperty("plantId").GetString();
-            
-            _logger.LogWarning("💀 Plant died: {PlantId}", plantId);
-            
-            // TODO: Mark plant as dead in database
-        }
-
-        private void HandleSimulatorStarted(JsonElement data)
-        {
-            var numPlants = data.GetProperty("num_plants").GetInt32();
-            
-            _logger.LogInformation("🚀 Simulator started with {NumPlants} plants", numPlants);
+                _logger.LogInformation("📘 Saved event log: {Event}", type);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save event log");
+            }
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)
