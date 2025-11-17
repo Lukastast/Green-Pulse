@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Green_Pulse_Backend.Services;
 
 namespace Green_Pulse_Backend.Controllers
 {
@@ -7,7 +6,7 @@ namespace Green_Pulse_Backend.Controllers
     [Route("api/plants")]
     public class PlantsController : ControllerBase
     {
-        private readonly PlantControlService _plantControlService;
+       /*  private readonly PlantControlService _plantControlService;
         private readonly WateringService _wateringService;
 
         public PlantsController(PlantControlService plantControlService, WateringService wateringService)
@@ -21,6 +20,6 @@ namespace Green_Pulse_Backend.Controllers
         {
             await _plantControlService.WaterPlantAsync(plantId, amount);
             return Ok(new { message = $"Water command sent for {plantId}" });
-        }
+        } */
     }
 }

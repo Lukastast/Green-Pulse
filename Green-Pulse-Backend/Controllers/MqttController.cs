@@ -6,6 +6,7 @@ namespace Green_Pulse_Backend.Controllers
     [Route("api/mqtt")]
     public class MqttController : ControllerBase
     {
+          /*  
         private readonly Services.MqttSubscriberService _mqttService;
 
         public MqttController(Services.MqttSubscriberService mqttService)
@@ -13,10 +14,10 @@ namespace Green_Pulse_Backend.Controllers
             _mqttService = mqttService;
         }
 
-        [HttpGet("subsribeToMqtt")]
+     [HttpGet("subsribeToMqtt")]
         public IActionResult GetMessages()
         {
             return Ok(_mqttService.Messages);
-        }
+        } */
     }
 }

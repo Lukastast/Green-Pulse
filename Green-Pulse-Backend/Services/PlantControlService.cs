@@ -1,6 +1,5 @@
-using System.Text.Json;
+/* using System.Text.Json;
 using MQTTnet;
-using MQTTnet.Client;
 using Microsoft.Extensions.Logging;
 
 namespace Green_Pulse_Backend.Services
@@ -59,3 +58,4 @@ namespace Green_Pulse_Backend.Services
 
     }
 }
+ */

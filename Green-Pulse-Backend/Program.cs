@@ -1,4 +1,6 @@
-using Green_Pulse_Backend.Services;
+using Green_Pulse_Backend.Models;
+using GreenPulse.Services;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,11 +11,11 @@ builder.Services.AddControllers();
 builder.Services.AddSingleton<MqttSubscriberService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MqttSubscriberService>());
 
-builder.Services.AddSingleton<WateringService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<WateringService>());
+/* builder.Services.AddSingleton<WateringService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WateringService>()); */
 
-builder.Services.AddSingleton<PlantControlService>();
-
+//builder.Services.AddSingleton<PlantControlService>();
+builder.Services.Configure<MqttSettings>(builder.Configuration.GetSection("Mqtt"));
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -21,8 +23,8 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 // Initialize PlantControlService (for MQTT connection)
-var plantControlService = app.Services.GetRequiredService<PlantControlService>();
-await plantControlService.InitializeAsync();
+//var plantControlService = app.Services.GetRequiredService<PlantControlService>();
+//await plantControlService.InitializeAsync();
 
 if (app.Environment.IsDevelopment())
 {
