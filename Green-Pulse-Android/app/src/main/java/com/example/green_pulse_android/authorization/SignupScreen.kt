@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,10 +17,14 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme.typography
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -33,12 +38,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.example.green_pulse_android.R
+import com.example.green_pulse_android.helpers.AuthState
+import com.example.green_pulse_android.helpers.LOGIN_SCREEN
 import com.example.green_pulse_android.ui.theme.GreenPulseAndroidTheme
 import com.example.green_pulse_android.ui.theme.Purple40
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun SignupScreen(
+    openScreen: (String) ->  Unit,
     openAndPopUp: (String, String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SignUpViewModel = hiltViewModel()
@@ -112,6 +120,24 @@ fun SignupScreen(
             visualTransformation = PasswordVisualTransformation()
         )
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (authState is AuthState.Error) {
+            Text(
+                text = authState.message,
+                style = typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
+        if (authState is AuthState.Loading) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+        }
+
+        TextButton(onClick = { openScreen(LOGIN_SCREEN) }) {
+            Text(text = stringResource(R.string.login_description), fontSize = 14.sp)
+        }
         Spacer(modifier = Modifier
             .fillMaxWidth()
             .padding(12.dp))
@@ -150,6 +176,6 @@ fun SignupScreen(
 @Composable
 fun AuthPreview() {
     GreenPulseAndroidTheme() {
-        SignupScreen({ _, _ -> })
+       // SignupScreen({ _, _ -> })
     }
 }

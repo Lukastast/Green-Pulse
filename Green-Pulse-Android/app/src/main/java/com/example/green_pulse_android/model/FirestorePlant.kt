@@ -8,10 +8,20 @@ data class FirestorePlant(
     val userId: String = "",
     val name: String = "",
     val type: String = "Basil",
-    val environment: String = "Indoors",  // "Indoors", "Outdoors", "Greenhouse"
+    val environment: String = "",
     var alive: Boolean = true,
     var humidity: Float = 50f,
     var ph: Float = 6.5f,
     var temperature: Float = 22f,
     val createdAt: Timestamp = Timestamp.now()
 )
+
+data class PlantHistory(
+    val timestamp: Timestamp = Timestamp.now(),
+    val alive: Boolean,
+    val humidity: Float,
+    val ph: Float,
+    val temperature: Float
+) {
+    constructor() : this(Timestamp.now(), false, 0f, 0f, 0f)
+}

@@ -1,4 +1,4 @@
-package com.example.green_pulse_android.plants
+package com.example.green_pulse_android.home
 
 import com.example.green_pulse_android.GreenPulseViewModel
 import com.example.green_pulse_android.firebase.AccountService

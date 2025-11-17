@@ -1,4 +1,4 @@
-package com.example.green_pulse_android.plants
+package com.example.green_pulse_android.home
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
