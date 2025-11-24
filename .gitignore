@@ -8,7 +8,6 @@
 # Ignore Firestore service account key
 #Green-Pulse-Backend/firestore-key.json
 
-# Firebase
 serviceAccountKey.json
 *.json
 
