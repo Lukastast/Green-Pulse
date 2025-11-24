@@ -1,140 +1,276 @@
-/* using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
+using System.Security.Authentication;
+using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using MQTTnet;
-using MQTTnet.Client;
 using MQTTnet.Protocol;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
 
-namespace Green_Pulse_Backend.Services
+namespace GreenPulse.Services
 {
     public class WateringService : BackgroundService
     {
         private readonly ILogger<WateringService> _logger;
-        private readonly IMqttClient _mqttClient;
-        private readonly ConcurrentDictionary<string, Models.PlantStatus> _plantStatuses = new();
+        private IMqttClient? _mqttClient;
+        private readonly ConcurrentDictionary<string, PlantStatus> _plantStatuses = new();
 
-        private const double DryThreshold = 30.0;
-        private const double WetThreshold = 40.0;
+        // MQTT Config
+        private const string BROKER = "10.42.131.124"; // or "10.42.131.124"
+        private const int PORT = 8883;
+        private const string USERNAME = "sensor_user";
+        private const string PASSWORD = "securepass123";
+        private const string SUBSCRIBE_TOPIC = "greenpulse/simulator";
+        private const string PUBLISH_TOPIC_PREFIX = "greenpulse/humidity";
+
+        // Watering thresholds
+        private const double DRY_THRESHOLD = 30.0;
+        private const double WET_THRESHOLD = 40.0;
+        private const double WATERING_AMOUNT = 0.3;
 
         public WateringService(ILogger<WateringService> logger)
         {
             _logger = logger;
-            _mqttClient = new MqttFactory().CreateMqttClient();
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("Starting WateringService...");
-
-            // Opsæt MQTT options med TLS og username/password
-            var options = new MqttClientOptionsBuilder()
-                .WithClientId("watering_service")
-                .WithTcpServer("10.42.131.125", 8883)
-                .WithCredentials("sensor_user", "securepass123")
-                .WithTls(o =>
-                {
-                    o.UseTls = true;
-                    o.SslProtocol = System.Security.Authentication.SslProtocols.Tls12;
-
-                    // Acceptér alle certifikater (inkl. selvsignerede)
-                    o.CertificateValidationHandler = context =>
-                    {
-                        _logger.LogWarning($"⚠️ Accepting broker certificate for {context.Certificate.Subject}");
-                        return true; // acceptér uanset hvad
-                    };
-                })
-                .Build();
-
-
-            _mqttClient.ConnectedAsync += async e =>
-            {
-                _logger.LogInformation("✅ Connected to MQTT broker!");
-                // Subscribe til simulator topic
-                await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder()
-                    .WithTopic("greenpulse/simulator")
-                    .WithAtLeastOnceQoS()
-                    .Build());
-            };
-
-            _mqttClient.ApplicationMessageReceivedAsync += async e =>
-            {
-                try
-                {
-                    if (e.ApplicationMessage?.Payload == null || e.ApplicationMessage.Payload.Length == 0)
-                        return;
-
-                    string payloadString = System.Text.Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                    using var payload = JsonDocument.Parse(payloadString);
-
-                    if (!payload.RootElement.TryGetProperty("plantId", out var idProp) ||
-                        !payload.RootElement.TryGetProperty("humidity", out var humProp))
-                        return;
-
-                    string plantId = idProp.GetString()!;
-                    double humidity = humProp.GetDouble();
-
-                    var plant = _plantStatuses.GetOrAdd(plantId, new Models.PlantStatus { PlantId = plantId });
-                    plant.Humidity = humidity;
-
-                    // Hysterese
-                    if (!plant.NeedsWater && humidity < DryThreshold)
-                    {
-                        plant.NeedsWater = true;
-                        _logger.LogWarning($"⚠️ {plantId} is too dry! Humidity: {humidity:F1}%");
-                    }
-                    else if (plant.NeedsWater && humidity > WetThreshold)
-                    {
-                        plant.NeedsWater = false;
-                        _logger.LogInformation($"✅ {plantId} humidity back to normal: {humidity:F1}%");
-                    }
-
-                    // Publicér humidity-status til EMQX-dashboard
-                    var humidityPayload = new
-                    {
-                        plantId,
-                        humidity = plant.Humidity,
-                        timestamp = DateTime.UtcNow
-                    };
-
-                    var message = new MqttApplicationMessageBuilder()
-                        .WithTopic($"greenpulse/humidity/{plantId}")
-                        .WithPayload(JsonSerializer.Serialize(humidityPayload))
-                        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-                        .Build();
-
-                    await _mqttClient.PublishAsync(message, stoppingToken);
-                    _logger.LogInformation($"📡 Published humidity update for {plantId}: {plant.Humidity:F1}%");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error parsing MQTT payload");
-                }
-            };
-
             try
             {
-                await _mqttClient.ConnectAsync(options, stoppingToken);
+                await ConnectToMqttBroker(stoppingToken);
+
+                // Main loop
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    await CheckAndWaterPlants(stoppingToken);
+                    await Task.Delay(10000, stoppingToken); // Check every 10 seconds
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to connect to MQTT broker");
-            }
-
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                await Task.Delay(10000, stoppingToken);
+                _logger.LogError(ex, "WateringService crashed");
             }
         }
 
-        public List<Models.PlantStatus> GetStatuses() => _plantStatuses.Values.ToList();
+        private async Task ConnectToMqttBroker(CancellationToken stoppingToken)
+        {
+            var factory = new MqttClientFactory();
+            _mqttClient = factory.CreateMqttClient();
+
+            var tlsOptions = new MqttClientTlsOptions
+            {
+                UseTls = true,
+                SslProtocol = SslProtocols.Tls12 | SslProtocols.Tls13,
+                CertificateValidationHandler = _ => true
+            };
+
+            var options = new MqttClientOptionsBuilder()
+                .WithTcpServer(BROKER, PORT)
+                .WithCredentials(USERNAME, PASSWORD)
+                .WithClientId($"watering-service-{Guid.NewGuid()}")
+                .WithCleanSession()
+                .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
+                .WithTimeout(TimeSpan.FromSeconds(10))
+                .WithTlsOptions(tlsOptions)
+                .Build();
+
+            _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
+
+            _mqttClient.ConnectedAsync += async e =>
+            {
+                _logger.LogInformation("✅ WateringService connected to MQTT broker at {Broker}:{Port}", BROKER, PORT);
+
+                var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
+                    .WithTopicFilter(f => f
+                        .WithTopic(SUBSCRIBE_TOPIC)
+                        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
+                    .Build();
+
+                await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
+                _logger.LogInformation("💧 WateringService subscribed to: {Topic}", SUBSCRIBE_TOPIC);
+            };
+
+            _mqttClient.DisconnectedAsync += async e =>
+            {
+                _logger.LogWarning("❌ WateringService disconnected. Reason: {Reason}", e.Reason);
+
+                if (!stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Reconnecting in 5 seconds...");
+                    await Task.Delay(5000, stoppingToken);
+
+                    try
+                    {
+                        await _mqttClient.ConnectAsync(options, stoppingToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Reconnection failed");
+                    }
+                }
+            };
+
+            _logger.LogInformation("WateringService connecting to MQTT broker...");
+            await _mqttClient.ConnectAsync(options, stoppingToken);
+        }
+
+        private Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs e)
+        {
+            try
+            {
+                string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
+                using var json = JsonDocument.Parse(payload);
+
+                // Only process sensor_update events
+                if (!json.RootElement.TryGetProperty("event", out var eventProp) ||
+                    eventProp.GetString() != "sensor_update")
+                {
+                    return Task.CompletedTask;
+                }
+
+                if (!json.RootElement.TryGetProperty("plantId", out var plantIdProp) ||
+                    !json.RootElement.TryGetProperty("humidity", out var humidityProp))
+                {
+                    return Task.CompletedTask;
+                }
+
+                string plantId = plantIdProp.GetString()!;
+                double humidity = humidityProp.GetDouble();
+                bool alive = json.RootElement.TryGetProperty("alive", out var aliveProp) && aliveProp.GetBoolean();
+
+                // Skip dead plants
+                if (!alive)
+                {
+                    return Task.CompletedTask;
+                }
+
+                // Update or create plant status
+                var plant = _plantStatuses.GetOrAdd(plantId, new PlantStatus { PlantId = plantId });
+                plant.Humidity = humidity;
+                plant.LastUpdate = DateTime.UtcNow;
+
+                // Hysteresis logic
+                if (!plant.NeedsWater && humidity < DRY_THRESHOLD)
+                {
+                    plant.NeedsWater = true;
+                    _logger.LogWarning("⚠️ {PlantId} is too dry! Humidity: {Humidity:F1}%", plantId, humidity);
+                }
+                else if (plant.NeedsWater && humidity > WET_THRESHOLD)
+                {
+                    plant.NeedsWater = false;
+                    _logger.LogInformation("✅ {PlantId} humidity back to normal: {Humidity:F1}%", plantId, humidity);
+                }
+
+                // Publish humidity status to dashboard topic
+                _ = PublishHumidityStatus(plantId, humidity);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing MQTT message in WateringService");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private async Task CheckAndWaterPlants(CancellationToken stoppingToken)
+        {
+            if (_mqttClient == null || !_mqttClient.IsConnected)
+            {
+                return;
+            }
+
+            foreach (var kvp in _plantStatuses)
+            {
+                var plant = kvp.Value;
+
+                if (plant.NeedsWater)
+                {
+                    await SendWateringCommand(plant.PlantId, stoppingToken);
+                }
+            }
+        }
+
+        private async Task SendWateringCommand(string plantId, CancellationToken stoppingToken)
+        {
+            if (_mqttClient == null || !_mqttClient.IsConnected)
+            {
+                return;
+            }
+
+            try
+            {
+                var waterCommand = new
+                {
+                    action = "water",
+                    plantId = plantId,
+                    amount = WATERING_AMOUNT,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                };
+
+                var message = new MqttApplicationMessageBuilder()
+                    .WithTopic(SUBSCRIBE_TOPIC)
+                    .WithPayload(JsonSerializer.Serialize(waterCommand))
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                    .Build();
+
+                await _mqttClient.PublishAsync(message, stoppingToken);
+                _logger.LogInformation("💧 Sent watering command for {PlantId} (amount: {Amount})", plantId, WATERING_AMOUNT);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send watering command for {PlantId}", plantId);
+            }
+        }
+
+        private async Task PublishHumidityStatus(string plantId, double humidity)
+        {
+            if (_mqttClient == null || !_mqttClient.IsConnected)
+            {
+                return;
+            }
+
+            try
+            {
+                var humidityPayload = new
+                {
+                    plantId,
+                    humidity,
+                    timestamp = DateTime.UtcNow
+                };
+
+                var message = new MqttApplicationMessageBuilder()
+                    .WithTopic($"{PUBLISH_TOPIC_PREFIX}/{plantId}")
+                    .WithPayload(JsonSerializer.Serialize(humidityPayload))
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                    .Build();
+
+                await _mqttClient.PublishAsync(message);
+                _logger.LogDebug("📡 Published humidity status for {PlantId}: {Humidity:F1}%", plantId, humidity);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to publish humidity status for {PlantId}", plantId);
+            }
+        }
+
+        public List<PlantStatus> GetStatuses() => _plantStatuses.Values.ToList();
+
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            if (_mqttClient != null && _mqttClient.IsConnected)
+            {
+                await _mqttClient.DisconnectAsync(cancellationToken: cancellationToken);
+                _mqttClient.Dispose();
+            }
+
+            await base.StopAsync(cancellationToken);
+        }
+    }
+
+    // Plant status model
+    public class PlantStatus
+    {
+        public string PlantId { get; set; } = string.Empty;
+        public double Humidity { get; set; }
+        public bool NeedsWater { get; set; }
+        public DateTime LastUpdate { get; set; }
     }
 }
- */

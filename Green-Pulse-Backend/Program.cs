@@ -1,5 +1,4 @@
 using Google.Cloud.Firestore;
-using Green_Pulse_Backend.Models;
 using GreenPulse.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,37 +7,58 @@ var builder = WebApplication.CreateBuilder(args);
 // FIRESTORE CONFIGURATION
 // -----------------------------------------------------------
 
-// Make sure the service account JSON is in the project root and named exactly "firestore-key.json"
-Environment.SetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS",
-    Path.Combine(builder.Environment.ContentRootPath, "firestore-key.json"));
+// Read config from appsettings.json
+var projectId = builder.Configuration["Firebase:ProjectId"];
+var keyPath = builder.Configuration["Firebase:KeyPath"];
+
+// Set environment variable for Firestore authentication
+Environment.SetEnvironmentVariable(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    Path.Combine(builder.Environment.ContentRootPath, keyPath!)
+);
 
 // Register Firestore as a singleton service
 builder.Services.AddSingleton(provider =>
 {
-    var projectId = "green-pulse-4ebdf"; // Your Firestore Project ID
     var firestore = FirestoreDb.Create(projectId);
-    Console.WriteLine($"Firestore connected to project: {projectId}");
+    Console.WriteLine($"✅ Firestore connected to project: {projectId}");
     return firestore;
 });
 
 // -----------------------------------------------------------
-// ADD SERVICES / CONTROLLERS
+// MQTT SERVICES
+// -----------------------------------------------------------
+
+// Register WateringService as singleton (so it can be injected in controller)
+builder.Services.AddSingleton<WateringService>();
+
+// Register as hosted background services
+builder.Services.AddHostedService(provider => provider.GetRequiredService<WateringService>());
+builder.Services.AddHostedService<MqttSubscriberService>();
+
+// -----------------------------------------------------------
+// ADD CONTROLLERS & SWAGGER
 // -----------------------------------------------------------
 
 builder.Services.AddControllers();
-
-// MQTT Subscriber service
-builder.Services.AddSingleton<MqttSubscriberService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<MqttSubscriberService>());
-
-// Swagger for API testing
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Add CORS if needed for frontend
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
 
 var app = builder.Build();
 
 // -----------------------------------------------------------
-// PIPELINE
+// PIPELINE CONFIGURATION
 // -----------------------------------------------------------
 
 if (app.Environment.IsDevelopment())
@@ -47,9 +67,13 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCors();
 app.UseHttpsRedirection();
 app.UseAuthorization();
-
 app.MapControllers();
+
+Console.WriteLine("🚀 Green Pulse Backend is running!");
+Console.WriteLine("📡 MQTT Services: MqttSubscriberService, WateringService");
+Console.WriteLine($"🔥 Firestore Project: {projectId}");
 
 app.Run();

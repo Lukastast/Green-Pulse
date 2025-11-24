@@ -8,6 +8,14 @@
 # Ignore Firestore service account key
 #Green-Pulse-Backend/firestore-key.json
 
+# Firebase
+serviceAccountKey.json
+*.json
+
+# Android
+*.keystore
+local.properties
+google-services.json
 
 # Gradle filer
 .gradle/

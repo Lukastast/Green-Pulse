@@ -11,8 +11,8 @@ import paho.mqtt.client as mqtt
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# ---------------- CONFIG ---------------- #
-BROKER = "10.42.131.124"
+# ---------------- MQTT CONFIG ---------------- #
+BROKER = "10.42.131.124"  # Private EMQX broker
 PORT = 8883
 USERNAME = "sensor_user"
 PASSWORD = "securepass123"
