@@ -32,22 +32,23 @@ import kotlin.random.Random
 @HiltViewModel
 class PlantViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val plantRepository: PlantRepository  // Inject repo for Firestore
+    private val plantRepository: PlantRepository,
+    private val mqttClient: MqttAndroidClient,
+    private val connectOptions: MqttConnectOptions
 ) : ViewModel() {
     private val gson = Gson()
-    private val _plantsByEnvironment = mutableStateMapOf<String, SnapshotStateList<Plant>>()  // Group by environment
+    private val _plantsByEnvironment = mutableStateMapOf<String, SnapshotStateList<Plant>>()
     val plantsByEnvironment: Map<String, SnapshotStateList<Plant>> = _plantsByEnvironment
     private val _isLoading = mutableStateOf(true)
     val isLoading = _isLoading
-    private var mqttClient: MqttAndroidClient? = null
     private val handler = Handler(Looper.getMainLooper())
-    private var isConnecting = false  // Prevent multiple connects
+    private var isConnecting = false
 
     init {
         Log.d("PlantViewModel", "🔧 ViewModel initialized - starting MQTT setup")
         setupFirestoreListener()
-        setupMqtt()
-    }
+        connectMqttIfNeeded()
+         }
 
     private fun setupFirestoreListener() {
         val userId = FirebaseAuth.getInstance().currentUser?.uid ?: run {
@@ -83,22 +84,14 @@ class PlantViewModel @Inject constructor(
         }
     }
 
-    private fun setupMqtt() {
-        if (isConnecting) return
+    private fun connectMqttIfNeeded() {
+        if (isConnecting || mqttClient.isConnected) return
         isConnecting = true
 
-        val clientId = "greenpulse-android-${UUID.randomUUID()}"  // Unique for Android client
-        val serverUri = "tcp://10.42.131.124:1883"  // CHANGE: Use 1883 for MQTT (unsecured). Replace IP with your broker's actual IP
-        // For TLS: "ssl://10.42.131.124:8883" and add .setSocketFactory(sslContext.socketFactory) to options
-
-        val client = MqttAndroidClient(context, serverUri, clientId)
-        mqttClient = client
-
-        client.setCallback(object : MqttCallbackExtended {
+        mqttClient.setCallback(object : MqttCallbackExtended {
             override fun connectComplete(reconnect: Boolean, serverURI: String?) {
-                Log.d("MQTT", "✅ Connected to MQTT broker (reconnect: $reconnect)")
+                Log.d("MQTT", "Connected (reconnect: $reconnect)")
                 isConnecting = false
-                // Subscribe after connect
                 subscribeToTopics()
             }
 
@@ -106,7 +99,7 @@ class PlantViewModel @Inject constructor(
                 Log.w("MQTT", "⚠️ Connection lost: ${cause?.message}")
                 isConnecting = false
                 // Simple reconnect retry after 5s
-                handler.postDelayed({ setupMqtt() }, 5000)
+                handler.postDelayed({ connectMqttIfNeeded() }, 5000)
             }
 
             override fun messageArrived(topic: String?, message: MqttMessage?) {
@@ -133,11 +126,6 @@ class PlantViewModel @Inject constructor(
                             }
                             if (!it.alive) it.alive = true  // Assume alive unless dead event
 
-                            // Optional: Handle prediction (e.g., show alert)
-                            if (prediction != null) {
-                                Log.d("MQTT", "Prediction for $plantId: $prediction")
-                                // TODO: Update UI state for alerts
-                            }
 
                             // Sync to Firestore
                             viewModelScope.launch {
@@ -157,21 +145,12 @@ class PlantViewModel @Inject constructor(
             }
         })
 
-        val options = MqttConnectOptions().apply {
-            isCleanSession = true
-            connectionTimeout = 10
-            keepAliveInterval = 20
-            userName = "app_user"  // CHANGE: Use ACL user for subscribe
-            password = "your_app_user_password".toCharArray()  // CHANGE: Set actual password
-            // For TLS: Add SSLContext setup if using ssl:// URI
-        }
-
-        client.connect(options, null, object : IMqttActionListener {
+        mqttClient.connect(connectOptions, null, object : IMqttActionListener {
             override fun onSuccess(asyncActionToken: IMqttToken?) {
-                Log.d("MQTT", "✅ Connection successful")
+                Log.d("MQTT", "Connection successful")
             }
             override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                Log.e("MQTT", "⚠️ Connection failed: ${exception?.message}")
+                Log.e("MQTT", "Connection failed", exception)
                 isConnecting = false
             }
         })
@@ -231,7 +210,7 @@ class PlantViewModel @Inject constructor(
             this.payload = gson.toJson(payload).toByteArray()
             qos = 1
         }
-        mqttClient?.publish("greenpulse/commands/#", message, null, object : IMqttActionListener {  // CHANGE: Use commands topic per ACL
+        mqttClient.publish("greenpulse/newplant", message, null, object : IMqttActionListener {  // CHANGE: Use commands topic per ACL
             override fun onSuccess(asyncActionToken: IMqttToken?) {
                 Log.d("MQTT", "✅ Published: ${payload["action"]}")
             }
@@ -248,6 +227,5 @@ class PlantViewModel @Inject constructor(
         } catch (e: Exception) {
             Log.e("MQTT", "⚠️ Disconnect error: ${e.message}")
         }
-        mqttClient = null
     }
 }
