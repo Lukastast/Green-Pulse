@@ -5,8 +5,9 @@
 
 # dotenv files
 .env
-# Firebase key (sensitive credentials)
-Green-Pulse-Backend/firebase-key.json
+# Ignore Firestore service account key
+#Green-Pulse-Backend/firestore-key.json
+
 
 # Gradle filer
 .gradle/

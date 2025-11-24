@@ -4,7 +4,7 @@ import uuid  # For unique CLIENT_ID
 import ssl  # For TLS
 
 # Configuration
-BROKER = "localhost"  # Private Mosquitto broker
+BROKER = "10.42.131.124"  # Private Mosquitto broker
 PORT = 8883  # TLS port
 USERNAME = "app_user"  # For subscriber
 PASSWORD = "appsecure456"  # Password
