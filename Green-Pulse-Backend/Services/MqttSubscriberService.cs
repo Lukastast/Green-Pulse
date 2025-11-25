@@ -14,7 +14,7 @@ namespace GreenPulse.Services
         private IMqttClient? _mqttClient;
 
         // MQTT Config
-        private const string BROKER = "10.42.131.124"; 
+        private const string BROKER = "192.168.0.124"; 
         private const int PORT = 8883;
         private const string USERNAME = "app_user";
         private const string PASSWORD = "appsecure456";

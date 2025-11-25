@@ -1,18 +1,24 @@
 services:
   emqx-broker:
-    image: emqx/emqx:latest  # v5.7.1 or latest, MQTT v5
+    image: emqx/emqx:latest
     container_name: emqx-broker
     ports:
-      - "1883:1883"  # Non-TLS (optional)
-      - "8883:8883"  # TLS
-      - "18083:18083"  # Dashboard
+      - "1883:1883"
+      - "8883:8883"
+      - "18083:18083"
     volumes:
       - emqx_data:/opt/emqx/data
+      - ./Broker/server.crt:/opt/emqx/etc/certs/cert.pem
+      - ./Broker/server.key:/opt/emqx/etc/certs/key.pem
+      - ./Broker/ca.crt:/opt/emqx/etc/certs/cacert.pem
     environment:
       EMQX_NAME: emqx
-      EMQX_HOST: 127.0.0.1
-      EMQX_NODE__COOKIE: my-secure-cookie-123  
-
+      EMQX_NODE__COOKIE: my-secure-cookie-123
+      # TLS Configuration
+      EMQX_LISTENERS__SSL__DEFAULT__BIND: "8883"
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CERTFILE: /opt/emqx/etc/certs/cert.pem
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__KEYFILE: /opt/emqx/etc/certs/key.pem
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CACERTFILE: /opt/emqx/etc/certs/cacert.pem
     restart: always
 
 volumes:

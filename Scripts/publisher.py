@@ -8,7 +8,7 @@ import paho.mqtt.client as mqtt
 from datetime import datetime  # For timestamps
 
 # ---------------- MQTT CONFIG ---------------- #
-BROKER = "10.42.131.124"  # Private EMQX broker
+BROKER = "192.168.0.124"  # Private EMQX broker
 PORT = 8883
 USERNAME = "sensor_user"  # Use sensor_user for full publish access to greenpulse/#
 PASSWORD = "securepass123"  # Replace with your actual password for sensor_user
