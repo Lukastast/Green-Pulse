@@ -14,19 +14,16 @@ from firebase_admin import credentials, firestore
 # ---------------- MQTT CONFIG ---------------- #
 BROKER = "10.42.131.124"  # Private EMQX broker
 PORT = 8883
-USERNAME = "sensor_user"
-PASSWORD = "securepass123"
+USERNAME = "sensor_user" 
+PASSWORD = "securepass123"#securepass123 appsecure456
 CLIENT_ID = f"greenpulse-sim-{uuid.uuid4()}"
 TOPIC_SIM = "greenpulse/simulator"
 TOPIC_NEW_PLANT = "greenpulse/newplant"
 TOPIC_WATER = "greenpulse/water"
 KEEPALIVE = 60
 
-# Change this to your actual Firebase user UID (from Android auth)
-TARGET_USER_UID = "9cnl61hcsNdThcJDn7nZSaMENgn2"  # <-- Your UID here
-
 # ---------------- FIRESTORE SETUP ---------------- #
-cred = credentials.Certificate("serviceAccountKey.json")
+cred = credentials.Certificate("serviceAccountKey2.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -81,14 +78,10 @@ def load_plants_from_firestore():
         print(f"Loaded {plant_id} ({plant_type}) in {environment}")
 
     print(f"Loaded {total} plants from ALL users")
+
 def on_snapshot(col_snapshot, changes, read_time):
     print("Firestore plants changed — reloading...")
     load_plants_from_firestore()
-
-# After load_plants_from_firestore():
-for env in ["Indoors", "Outdoors", "Greenhouse"]:
-    ref = db.collection("environments").document(env).collection("plants")
-    ref.where("userId", "==", TARGET_USER_UID).on_snapshot(on_snapshot)
 
 # ---------------- PLANT LOGIC ---------------- #
 
@@ -116,7 +109,7 @@ def update_plants(client):
 
         for plant_id, plant in list(active_plants.items()):
             if not plant["alive"]:
-                continue
+               continue
 
             env = plant_types.get(plant["type"], plant_types["default"])
             temp_effect = (plant["temperature"] - 20) * 0.02
@@ -188,6 +181,8 @@ def on_message(client, userdata, msg):
 
         # Route based on topic OR action — both work
         topic = msg.topic
+
+        print(f"MQTT ← {topic}: {payload}")
 
         # === NEW PLANT CREATION ===
         if topic == "greenpulse/newplant" or action == "add_plant":

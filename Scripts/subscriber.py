@@ -14,7 +14,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Connected with result code {reason_code}")
     if reason_code == 0:
         print("Subscription successful")
-        client.subscribe("greenpulse/#", qos=1)  # All data
+        client.subscribe("greenpulse/newplant", qos=1)  # All data
     else:
         print(f"Connection failed: {reason_code}")
 
