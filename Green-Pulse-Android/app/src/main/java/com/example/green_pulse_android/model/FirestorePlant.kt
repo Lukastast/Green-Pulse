@@ -5,7 +5,6 @@ import java.util.UUID
 
 data class FirestorePlant(
     val id: String = UUID.randomUUID().toString(),
-    val userId: String = "",
     val name: String = "",
     val type: String = "Basil",
     val environment: String = "",

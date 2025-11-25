@@ -151,7 +151,7 @@ fun CreatePlantScreen(
                                     }
                                 },
                                 onSuccessRefresh = {}
-                            ) { }
+                            )
                         }
                     }) {
                         Text("Create")

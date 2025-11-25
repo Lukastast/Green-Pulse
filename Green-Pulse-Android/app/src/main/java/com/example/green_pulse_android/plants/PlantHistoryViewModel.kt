@@ -88,6 +88,7 @@ class PlantHistoryViewModel @Inject constructor(
         }
     }
 
+
     private fun loadHistory(plantId: String, environment: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }

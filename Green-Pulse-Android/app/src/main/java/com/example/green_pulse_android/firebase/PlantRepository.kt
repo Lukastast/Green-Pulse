@@ -19,77 +19,129 @@ class PlantRepository @Inject constructor(
     private val auth: FirebaseAuth
 ) {
     private val environmentsCollection = firestore.collection("environments")
-
-    // Create plant in env subcollection
+    private fun getUserPath(): String {
+        val uid = auth.currentUser?.uid
+            ?: throw IllegalStateException("User not authenticated")
+        return "users/$uid"
+    }
     suspend fun createPlant(plant: FirestorePlant, environment: String): Result<String> = withContext(Dispatchers.IO) {
         return@withContext try {
-            val userId = auth.currentUser?.uid ?: throw IllegalStateException("User not authenticated")
-            val plantToSave = plant.copy(userId = userId, createdAt = Timestamp.now())
-            val envDoc = environmentsCollection.document(environment)
-            val docRef = envDoc.collection("plants").document(plant.id)
-                docRef.set(plantToSave).await()
+            val uid = auth.currentUser?.uid ?: throw IllegalStateException("Not authenticated")
+            val userRoot = firestore.collection("users").document(uid)
 
-            // Initial history entry
+            val plantRef = userRoot
+                .collection("environments")
+                .document(environment)
+                .collection("plants")
+                .document(plant.id)
+
+            val plantToSave = plant.copy(createdAt = Timestamp.now())
+            plantRef.set(plantToSave).await()
+            // Initial history
             val initialHistory = PlantHistory(
                 alive = true,
-                humidity = plantToSave.humidity,
-                ph = plantToSave.ph,
-                temperature = plantToSave.temperature
+                humidity = plant.humidity,
+                ph = plant.ph,
+                temperature = plant.temperature
             )
-            docRef.collection("history").add(initialHistory).await()
-            Log.d("CreatePlantDebug", "Saved plant with custom ID ${plant.id} under $environment")
-            Result.success(docRef.id)
+            plantRef.collection("history").add(initialHistory).await()
+
+            Log.d("PlantRepo", "Created plant ${plant.id} in $environment for user $uid")
+            Result.success(plant.id)
         } catch (e: Exception) {
-            Log.e("PlantRepository", "Create plant failed", e)
+            Log.e("PlantRepo", "Create plant failed", e)
+            Result.failure(e)
+        }
+    }
+    fun listenToPlants(onUpdate: (List<FirestorePlant>) -> Unit) {
+        val uid = auth.currentUser?.uid ?: run {
+            Log.w("PlantRepo", "No user logged in; skipping listen")
+            return
+        }
+
+        val envs = listOf("Indoors", "Outdoors", "Greenhouse")
+        val allPlants = mutableListOf<FirestorePlant>()
+
+        envs.forEach { env ->
+            val plantsRef = firestore
+                .collection("users").document(uid)
+                .collection("environments").document(env)
+                .collection("plants")
+
+            plantsRef.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("PlantRepo", "Listen failed for $env", error)
+                    return@addSnapshotListener
+                }
+
+                val envPlants = snapshot?.toObjects(FirestorePlant::class.java) ?: emptyList()
+
+                // Remove old plants from this env, add new ones
+                allPlants.removeAll { it.environment == env }
+                allPlants.addAll(envPlants.map { it.copy(environment = env) }) // ensure env field
+
+                Log.d("PlantRepo", "Updated $env → total plants: ${allPlants.size}")
+                onUpdate(allPlants.toList())
+            }
+        }
+    }
+
+    suspend fun deletePlant(plantId: String, environment: String): Result<Unit> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val uid = auth.currentUser?.uid
+                ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
+
+            val plantRef = firestore
+                .collection("users")
+                .document(uid)
+                .collection("environments")
+                .document(environment)
+                .collection("plants")
+                .document(plantId)
+
+            // Delete the plant document (and all its history subcollection automatically)
+            plantRef.delete().await()
+
+            Log.d("PlantRepo", "Deleted plant $plantId from $environment")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("PlantRepo", "Failed to delete plant $plantId", e)
             Result.failure(e)
         }
     }
 
-    // Listen to all plants across environments (flattens subcollections)
-    fun listenToPlants(onUpdate: (List<FirestorePlant>) -> Unit) {
-        val userId = auth.currentUser?.uid ?: run {
-            Log.w("PlantRepository", "No user logged in; skipping listen")
-            return
-        }
-        val envs = listOf("Indoors", "Outdoors", "Greenhouse")
-        var currentPlants = mutableListOf<FirestorePlant>()  // Shared accumulator
-
-        envs.forEach { env ->
-            environmentsCollection.document(env)
-                .collection("plants")
-                .whereEqualTo("userId", userId)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("PlantRepository", "Listen failed for $env", error)
-                        return@addSnapshotListener
-                    }
-                    val envPlants = snapshot?.toObjects(FirestorePlant::class.java) ?: emptyList()
-                    // Remove old plants for this env only (avoids duplicates/clears)
-                    currentPlants.removeAll { it.environment == env }
-                    // Add updated plants for this env
-                    currentPlants.addAll(envPlants)
-                    // Trigger update with full merged list
-                    Log.d("PlantRepository", "Merged plants from $env: total ${currentPlants.size}")
-                    onUpdate(currentPlants.toList())
-                }
-        }
-    }
-
-    // Update plant stats and add to history
-    suspend fun updatePlantStats(plantId: String, environment: String, humidity: Float, ph: Float, temp: Float, alive: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun updatePlantStats(
+        plantId: String,
+        environment: String,
+        humidity: Float,
+        ph: Float,
+        temp: Float,
+        alive: Boolean
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         return@withContext try {
-            val envDoc = environmentsCollection.document(environment)
-            val plantDoc = envDoc.collection("plants").document(plantId)
-            plantDoc.update(
+            val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
+
+            val plantRef = firestore
+                .collection("users").document(uid)
+                .collection("environments").document(environment)
+                .collection("plants").document(plantId)  // ← THIS WAS MISSING!
+
+            plantRef.update(
                 "humidity", humidity,
                 "ph", ph,
                 "temperature", temp,
                 "alive", alive
             ).await()
 
-            // Append to history subcollection
-            val historyEntry = PlantHistory(alive = alive, humidity = humidity, ph = ph, temperature = temp)
-            plantDoc.collection("history").add(historyEntry).await()
+            // Append to history
+            val historyEntry = PlantHistory(
+                timestamp = Timestamp.now(),
+                alive = alive,
+                humidity = humidity,
+                ph = ph,
+                temperature = temp
+            )
+            plantRef.collection("history").add(historyEntry).await()
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -98,68 +150,88 @@ class PlantRepository @Inject constructor(
         }
     }
 
-    suspend fun getPlantsForEnv(env: String): List<FirestorePlant> = withContext(Dispatchers.IO) {
-        try {
-            val userId = auth.currentUser?.uid ?: return@withContext emptyList()
-            val snapshot = environmentsCollection.document(env)
-                .collection("plants")
-                .whereEqualTo("userId", userId)
-                .get().await()
-            snapshot.toObjects(FirestorePlant::class.java)
+    suspend fun addHistoryEntry(
+        plantId: String,
+        environment: String,
+        history: PlantHistory
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
+
+            val historyRef = firestore
+                .collection("users").document(uid)
+                .collection("environments").document(environment)
+                .collection("plants").document(plantId)  // ← THIS WAS MISSING!
+                .collection("history")
+
+            historyRef.add(history).await()
+            Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("PlantRepository", "Get plants for env failed", e)
-            emptyList()
+            Log.e("PlantRepo", "Failed to add history", e)
+            Result.failure(e)
         }
     }
 
     suspend fun getPlantById(environment: String, plantId: String): Result<FirestorePlant> = withContext(Dispatchers.IO) {
         return@withContext try {
-            val userId = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
-            Log.d("PlantByIdDebug", "Querying /environments/$environment/plants/$plantId for user $userId")
+            val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
 
-            val snapshot = environmentsCollection.document(environment)
-                .collection("plants")
-                .document(plantId)
-                .get()
-                .await()
+            val plantDoc = firestore
+                .collection("users").document(uid)                    // ← document
+                .collection("environments").document(environment)     // ← document
+                .collection("plants").document(plantId)                // ← document
 
-            Log.d("PlantByIdDebug", "Doc exists: ${snapshot.exists()}")
+            val snapshot = plantDoc.get().await()
             if (snapshot.exists()) {
-                val docUserId = snapshot.getString("userId")
-                Log.d("PlantByIdDebug", "Doc userId: '$docUserId', Current userId: '$userId'")
-            }
-
-            if (snapshot.exists() && snapshot.getString("userId") == userId) {
-                val plant = snapshot.toObject(FirestorePlant::class.java) ?: throw IllegalStateException("Plant not found")
-                Result.success(plant)
+                val plant = snapshot.toObject(FirestorePlant::class.java)
+                    ?: return@withContext Result.failure(IllegalStateException("Parse error"))
+                Result.success(plant.copy(environment = environment))
             } else {
-                Result.failure(IllegalArgumentException("Plant not owned by user or not found"))
+                Result.failure(IllegalArgumentException("Plant not found"))
             }
         } catch (e: Exception) {
-            Log.e("PlantByIdDebug", "Query failed", e)
+            Log.e("PlantRepo", "getPlantById failed", e)
             Result.failure(e)
         }
     }
 
-    suspend fun getPlantHistory(plantId: String, environment: String, limit: Int = 50): Result<List<PlantHistory>> = withContext(Dispatchers.IO) {
+    suspend fun getPlantHistory(
+        plantId: String,
+        environment: String,
+        limit: Int = 50
+    ): Result<List<PlantHistory>> = withContext(Dispatchers.IO) {
         return@withContext try {
-            val envDoc = environmentsCollection.document(environment)
-            val historyQuery = envDoc.collection("plants").document(plantId)
-                .collection("history")
+            val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
+
+            val historyQuery = firestore
+                .collection("users").document(uid)
+                .collection("environments").document(environment)
+                .collection("plants").document(plantId)
+                .collection("history")                                 // ← Now valid collection!
                 .orderBy("timestamp", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
 
             val snapshots = historyQuery.get().await()
-            val history = try {
-                snapshots.toObjects(PlantHistory::class.java)
-            } catch (e: RuntimeException) {
-                Log.e("PlantRepository", "Deserialization failed for history", e)
-                emptyList()  // Fallback—don't crash the app
-            }
+            val history = snapshots.toObjects(PlantHistory::class.java)
             Result.success(history)
         } catch (e: Exception) {
-            Log.e("PlantRepository", "Get history failed", e)
+            Log.e("PlantRepo", "getPlantHistory failed", e)
             Result.failure(e)
+        }
+    }
+    suspend fun getPlantsForEnv(env: String): List<FirestorePlant> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val userPath = getUserPath()  // e.g., "users/myUid"
+            val snapshot = firestore  // Start from firestore instance
+                .collection("$userPath/environments/$env/plants")  // Direct path string for subcollection
+                .get()
+                .await()  // Await Task<QuerySnapshot>
+            val plants = snapshot.toObjects(FirestorePlant::class.java)  // Now resolves
+            Log.d("PlantRepository", "Loaded ${plants.size} plants for env $env")
+            plants
+        } catch (e: Exception) {
+            Log.e("PlantRepository", "Get plants for env failed", e)
+            emptyList()
         }
     }
 }

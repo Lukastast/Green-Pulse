@@ -1,5 +1,6 @@
 package com.example.green_pulse_android.home
 
+import androidx.lifecycle.viewModelScope
 import com.example.green_pulse_android.GreenPulseViewModel
 import com.example.green_pulse_android.firebase.AccountService
 import com.example.green_pulse_android.helpers.LOGIN_SCREEN
@@ -9,6 +10,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
