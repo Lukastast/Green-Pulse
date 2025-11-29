@@ -16,8 +16,8 @@ namespace GreenPulse.Services
         private readonly ConcurrentDictionary<string, PlantStatus> _plantStatuses = new();
 
         // MQTT Config
-        private const string BROKER = "192.168.0.124";
-        private const int PORT = 8883;
+        private const string BROKER = "localhost";
+        private const int PORT = 1883;
         private const string USERNAME = "sensor_user";
         private const string PASSWORD = "securepass123";
         private const string SUBSCRIBE_TOPIC = "greenpulse/simulator";
@@ -69,7 +69,6 @@ namespace GreenPulse.Services
             {
                 _logger.LogInformation("Loading plant types from Firestore using collection group...");
 
-                // Use collection group to find ALL plants across all users
                 var plantsQuery = _firestore.CollectionGroup("plants");
                 var snapshot = await plantsQuery.GetSnapshotAsync();
 
@@ -82,9 +81,8 @@ namespace GreenPulse.Services
 
                     string plantType = data.ContainsKey("type") ? data["type"].ToString()! : "herb";
 
-                    // Parse environment from path: users/{userId}/environments/{env}/plants/{plantId}
                     var pathParts = doc.Reference.Path.Split('/');
-                    string environment = pathParts.Length >= 4 ? pathParts[3] : "Unknown";
+                    string environment = pathParts.Length >= 5 ? pathParts[3] : "Unknown";
 
                     var status = _plantStatuses.GetOrAdd(plantId, new PlantStatus
                     {
@@ -113,13 +111,6 @@ namespace GreenPulse.Services
             var factory = new MqttClientFactory();
             _mqttClient = factory.CreateMqttClient();
 
-            var tlsOptions = new MqttClientTlsOptions
-            {
-                UseTls = true,
-                SslProtocol = SslProtocols.Tls12 | SslProtocols.Tls13,
-                CertificateValidationHandler = _ => true
-            };
-
             var options = new MqttClientOptionsBuilder()
                 .WithTcpServer(BROKER, PORT)
                 .WithCredentials(USERNAME, PASSWORD)
@@ -127,7 +118,6 @@ namespace GreenPulse.Services
                 .WithCleanSession()
                 .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
                 .WithTimeout(TimeSpan.FromSeconds(10))
-                .WithTlsOptions(tlsOptions)
                 .Build();
 
             _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
@@ -177,54 +167,24 @@ namespace GreenPulse.Services
                 string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
                 using var json = JsonDocument.Parse(payload);
 
-                // Process "status" events (changed from "sensor_update")
-                if (!json.RootElement.TryGetProperty("event", out var eventProp) ||
-                    eventProp.GetString() != "status")
-                {
+                if (!json.RootElement.TryGetProperty("event", out var eventProp))
                     return Task.CompletedTask;
-                }
 
-                if (!json.RootElement.TryGetProperty("plantId", out var plantIdProp) ||
-                    !json.RootElement.TryGetProperty("humidity", out var humidityProp))
+                string eventType = eventProp.GetString()!;
+                switch (eventType)
                 {
-                    return Task.CompletedTask;
-                }
-
-                string plantId = plantIdProp.GetString()!;
-                double humidity = humidityProp.GetDouble();
-                bool alive = json.RootElement.TryGetProperty("alive", out var aliveProp) && aliveProp.GetBoolean();
-
-                // Skip dead plants
-                if (!alive)
-                {
-                    return Task.CompletedTask;
-                }
-
-                // Get or create plant status
-                var plant = _plantStatuses.GetOrAdd(plantId, new PlantStatus
-                {
-                    PlantId = plantId,
-                    Type = "herb" // Default, will be updated from Firestore
-                });
-
-                plant.Humidity = humidity;
-                plant.LastUpdate = DateTime.UtcNow;
-
-                // Get thresholds for this plant type
-                var thresholds = PlantTypes.GetValueOrDefault(plant.Type, PlantTypes["default"]);
-
-                // Check if plant needs water based on its type's thresholds
-                if (!plant.NeedsWater && humidity < thresholds.MinHumidity)
-                {
-                    plant.NeedsWater = true;
-                    _logger.LogWarning("⚠️ {PlantId} ({Type}) is too dry! Humidity: {Humidity:F1}% (min: {Min}%)",
-                        plantId, plant.Type, humidity, thresholds.MinHumidity);
-                }
-                else if (plant.NeedsWater && humidity > thresholds.MaxHumidity)
-                {
-                    plant.NeedsWater = false;
-                    _logger.LogInformation("✅ {PlantId} ({Type}) humidity back to normal: {Humidity:F1}%",
-                        plantId, plant.Type, humidity);
+                    case "status":
+                        ProcessStatus(json.RootElement);
+                        break;
+                    case "plant_added":
+                        _logger.LogInformation("New plant added: {PlantId}", json.RootElement.GetProperty("plantId").GetString());
+                        break;
+                    case "plant_watered":
+                        _logger.LogInformation("Plant watered: {PlantId}", json.RootElement.GetProperty("plantId").GetString());
+                        break;
+                    default:
+                        _logger.LogDebug("Ignored unknown event: {EventType}", eventType);
+                        break;
                 }
             }
             catch (Exception ex)
@@ -235,30 +195,59 @@ namespace GreenPulse.Services
             return Task.CompletedTask;
         }
 
+        private void ProcessStatus(JsonElement json)
+        {
+            if (!json.TryGetProperty("plantId", out var plantIdProp) ||
+                !json.TryGetProperty("humidity", out var humidityProp))
+                return;
+
+            string plantId = plantIdProp.GetString()!;
+            double humidity = humidityProp.GetDouble();
+            bool alive = json.TryGetProperty("alive", out var aliveProp) && aliveProp.GetBoolean();
+            if (!alive) return;
+
+            var plant = _plantStatuses.GetOrAdd(plantId, new PlantStatus
+            {
+                PlantId = plantId,
+                Type = "herb"
+            });
+
+            plant.Humidity = humidity;
+            plant.LastUpdate = DateTime.UtcNow;
+
+            var thresholds = PlantTypes.GetValueOrDefault(plant.Type, PlantTypes["default"]);
+
+            if (!plant.NeedsWater && humidity < thresholds.MinHumidity)
+            {
+                plant.NeedsWater = true;
+                _logger.LogWarning("⚠️ {PlantId} ({Type}) is too dry! Humidity: {Humidity:F1}% (min: {Min}%)",
+                    plantId, plant.Type, humidity, thresholds.MinHumidity);
+            }
+            else if (plant.NeedsWater && humidity > thresholds.MaxHumidity)
+            {
+                plant.NeedsWater = false;
+                _logger.LogInformation("✅ {PlantId} ({Type}) humidity back to normal: {Humidity:F1}%",
+                    plantId, plant.Type, humidity);
+            }
+        }
+
         private async Task CheckAndWaterPlants(CancellationToken stoppingToken)
         {
             if (_mqttClient == null || !_mqttClient.IsConnected)
-            {
                 return;
-            }
 
             foreach (var kvp in _plantStatuses)
             {
                 var plant = kvp.Value;
-
                 if (plant.NeedsWater)
-                {
                     await SendWateringCommand(plant.PlantId, stoppingToken);
-                }
             }
         }
 
         private async Task SendWateringCommand(string plantId, CancellationToken stoppingToken)
         {
             if (_mqttClient == null || !_mqttClient.IsConnected)
-            {
                 return;
-            }
 
             try
             {
@@ -298,7 +287,6 @@ namespace GreenPulse.Services
         }
     }
 
-    // Plant status model
     public class PlantStatus
     {
         public string PlantId { get; set; } = string.Empty;
@@ -309,7 +297,6 @@ namespace GreenPulse.Services
         public DateTime LastUpdate { get; set; }
     }
 
-    // Plant type thresholds
     public class PlantThresholds
     {
         public double IdealPh { get; set; }
