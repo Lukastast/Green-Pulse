@@ -16,8 +16,8 @@ namespace GreenPulse.Services
         // MQTT Config
         private const string BROKER = "192.168.0.124"; 
         private const int PORT = 8883;
-        private const string USERNAME = "app_user";
-        private const string PASSWORD = "appsecure456";
+        private const string USERNAME = "sensor_user";
+        private const string PASSWORD = "securepass123";
         private const string TOPIC = "greenpulse/#";
 
         public MqttSubscriberService(
@@ -41,7 +41,7 @@ namespace GreenPulse.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "MQTT Service crashed");
+                _logger.LogError(ex, "MQTT Subscriber Service crashed");
             }
         }
 
@@ -60,7 +60,7 @@ namespace GreenPulse.Services
             var options = new MqttClientOptionsBuilder()
                 .WithTcpServer(BROKER, PORT)
                 .WithCredentials(USERNAME, PASSWORD)
-                .WithClientId($"greenpulse-dotnet-{Guid.NewGuid()}")
+                .WithClientId($"greenpulse-subscriber-{Guid.NewGuid()}")
                 .WithCleanSession()
                 .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
                 .WithTimeout(TimeSpan.FromSeconds(10))
@@ -71,19 +71,19 @@ namespace GreenPulse.Services
 
             _mqttClient.ConnectedAsync += async e =>
             {
-                _logger.LogInformation("✅ MQTT connected to {Broker}:{Port}", BROKER, PORT);
+                _logger.LogInformation("✅ MQTT Subscriber connected to {Broker}:{Port}", BROKER, PORT);
 
                 var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
                     .WithTopicFilter(f => f.WithTopic(TOPIC).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
                     .Build();
 
                 await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
-                _logger.LogInformation("📡 Subscribed to MQTT topic: {Topic}", TOPIC);
+                _logger.LogInformation("📡 Subscribed to: {Topic}", TOPIC);
             };
 
             _mqttClient.DisconnectedAsync += async e =>
             {
-                _logger.LogWarning("❌ MQTT disconnected. Reason: {Reason}", e.Reason);
+                _logger.LogWarning("❌ MQTT Subscriber disconnected. Reason: {Reason}", e.Reason);
 
                 if (!stoppingToken.IsCancellationRequested)
                 {
@@ -96,7 +96,7 @@ namespace GreenPulse.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Reconnection failed.");
+                        _logger.LogError(ex, "Reconnection failed");
                     }
                 }
             };
@@ -112,16 +112,21 @@ namespace GreenPulse.Services
                 string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
                 string topic = e.ApplicationMessage.Topic;
 
-                _logger.LogInformation("📨 Incoming MQTT message on {Topic}", topic);
-                _logger.LogInformation("Payload: {Payload}", payload);
+                _logger.LogDebug("📨 MQTT message on {Topic}", topic);
 
                 using var json = JsonDocument.Parse(payload);
-                string eventType = json.RootElement.GetProperty("event").GetString()!;
+                
+                if (!json.RootElement.TryGetProperty("event", out var eventProp))
+                {
+                    return Task.CompletedTask;
+                }
+
+                string eventType = eventProp.GetString()!;
 
                 switch (eventType)
                 {
-                    case "sensor_update":
-                        _ = SaveSensorUpdate(json.RootElement);
+                    case "status":
+                        _ = SaveStatusToAllUsers(json.RootElement);
                         break;
 
                     case "plant_added":
@@ -145,13 +150,13 @@ namespace GreenPulse.Services
                         break;
 
                     default:
-                        _logger.LogWarning("⚠ Unknown event: {EventType}", eventType);
+                        _logger.LogDebug("Unknown event: {EventType}", eventType);
                         break;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error reading MQTT message");
+                _logger.LogError(ex, "Error processing MQTT message");
             }
 
             return Task.CompletedTask;
@@ -161,7 +166,7 @@ namespace GreenPulse.Services
         // FIRESTORE SAVE FUNCTIONS
         // ---------------------------
 
-        private async Task SaveSensorUpdate(JsonElement data)
+        private async Task SaveStatusToAllUsers(JsonElement data)
         {
             try
             {
@@ -171,27 +176,52 @@ namespace GreenPulse.Services
                 double temp = data.GetProperty("temperature").GetDouble();
                 bool alive = data.GetProperty("alive").GetBoolean();
 
-                var docRef = _firestore
-                    .Collection("plants")
-                    .Document(plantId)
-                    .Collection("sensor_updates")
-                    .Document(); // auto-ID
+                // Find all instances of this plant across all users using collection group query
+                var plantsQuery = _firestore.CollectionGroup("plants")
+                    .WhereEqualTo(FieldPath.DocumentId, plantId);
 
-                await docRef.SetAsync(new
+                var snapshot = await plantsQuery.GetSnapshotAsync();
+
+                if (snapshot.Documents.Count == 0)
                 {
-                    plantId,
-                    humidity,
-                    ph,
-                    temperature = temp,
-                    alive,
-                    timestamp = Timestamp.GetCurrentTimestamp()
-                });
+                    _logger.LogDebug("Plant {PlantId} not found in any user's collection", plantId);
+                    return;
+                }
 
-                _logger.LogInformation("🔥 Saved sensor update for plant {PlantId}", plantId);
+                _logger.LogDebug("Found {Count} instances of plant {PlantId}, saving to all", 
+                    snapshot.Documents.Count, plantId);
+
+                // Save to history for each user that has this plant
+                foreach (var plantDoc in snapshot.Documents)
+                {
+                    try
+                    {
+                        // Save to this plant's history collection
+                        var historyRef = plantDoc.Reference.Collection("history").Document();
+
+                        await historyRef.SetAsync(new
+                        {
+                            alive,
+                            humidity,
+                            ph,
+                            temperature = temp,
+                            timestamp = Timestamp.GetCurrentTimestamp()
+                        });
+
+                        _logger.LogDebug("✅ Saved status to {Path}/history", plantDoc.Reference.Path);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to save to {Path}", plantDoc.Reference.Path);
+                    }
+                }
+
+                _logger.LogInformation("🔥 Saved status for plant {PlantId} to {Count} user(s)", 
+                    plantId, snapshot.Documents.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save sensor update");
+                _logger.LogError(ex, "Failed to save status to all users");
             }
         }
 
@@ -199,6 +229,7 @@ namespace GreenPulse.Services
         {
             try
             {
+                // Save event logs to a global collection
                 var docRef = _firestore
                     .Collection("event_logs")
                     .Document();
@@ -210,7 +241,7 @@ namespace GreenPulse.Services
                     timestamp = Timestamp.GetCurrentTimestamp()
                 });
 
-                _logger.LogInformation("📘 Saved event log: {Event}", type);
+                _logger.LogDebug("📘 Saved event log: {Event}", type);
             }
             catch (Exception ex)
             {

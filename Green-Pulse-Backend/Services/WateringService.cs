@@ -4,49 +4,107 @@ using System.Text;
 using System.Text.Json;
 using MQTTnet;
 using MQTTnet.Protocol;
+using Google.Cloud.Firestore;
 
 namespace GreenPulse.Services
 {
     public class WateringService : BackgroundService
     {
         private readonly ILogger<WateringService> _logger;
+        private readonly FirestoreDb _firestore;
         private IMqttClient? _mqttClient;
         private readonly ConcurrentDictionary<string, PlantStatus> _plantStatuses = new();
 
         // MQTT Config
-        private const string BROKER = "192.168.0.124"; // or "10.42.131.124"
+        private const string BROKER = "192.168.0.124";
         private const int PORT = 8883;
         private const string USERNAME = "sensor_user";
         private const string PASSWORD = "securepass123";
         private const string SUBSCRIBE_TOPIC = "greenpulse/simulator";
-        private const string PUBLISH_TOPIC_PREFIX = "greenpulse/humidity";
+        private const string WATER_COMMAND_TOPIC = "greenpulse/commands/water";
 
-        // Watering thresholds
-        private const double DRY_THRESHOLD = 30.0;
-        private const double WET_THRESHOLD = 40.0;
+        // Plant type thresholds matching Python publisher
+        private static readonly Dictionary<string, PlantThresholds> PlantTypes = new()
+        {
+            { "cactus", new PlantThresholds { IdealPh = 6.0, MinHumidity = 20, MaxHumidity = 40, DryRate = 0.5 } },
+            { "tropical", new PlantThresholds { IdealPh = 6.5, MinHumidity = 60, MaxHumidity = 90, DryRate = 0.2 } },
+            { "herb", new PlantThresholds { IdealPh = 6.8, MinHumidity = 50, MaxHumidity = 80, DryRate = 0.3 } },
+            { "default", new PlantThresholds { IdealPh = 6.5, MinHumidity = 40, MaxHumidity = 70, DryRate = 0.3 } }
+        };
+
         private const double WATERING_AMOUNT = 0.3;
 
-        public WateringService(ILogger<WateringService> logger)
+        public WateringService(
+            ILogger<WateringService> logger,
+            FirestoreDb firestore)
         {
             _logger = logger;
+            _firestore = firestore;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             try
             {
+                // Load plant types from Firestore on startup
+                await LoadPlantTypesFromFirestore();
+
                 await ConnectToMqttBroker(stoppingToken);
 
-                // Main loop
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     await CheckAndWaterPlants(stoppingToken);
-                    await Task.Delay(10000, stoppingToken); // Check every 10 seconds
+                    await Task.Delay(10000, stoppingToken);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "WateringService crashed");
+            }
+        }
+
+        private async Task LoadPlantTypesFromFirestore()
+        {
+            try
+            {
+                _logger.LogInformation("Loading plant types from Firestore using collection group...");
+
+                // Use collection group to find ALL plants across all users
+                var plantsQuery = _firestore.CollectionGroup("plants");
+                var snapshot = await plantsQuery.GetSnapshotAsync();
+
+                int totalLoaded = 0;
+
+                foreach (var doc in snapshot.Documents)
+                {
+                    var plantId = doc.Id;
+                    var data = doc.ToDictionary();
+
+                    string plantType = data.ContainsKey("type") ? data["type"].ToString()! : "herb";
+
+                    // Parse environment from path: users/{userId}/environments/{env}/plants/{plantId}
+                    var pathParts = doc.Reference.Path.Split('/');
+                    string environment = pathParts.Length >= 4 ? pathParts[3] : "Unknown";
+
+                    var status = _plantStatuses.GetOrAdd(plantId, new PlantStatus
+                    {
+                        PlantId = plantId,
+                        Type = plantType,
+                        Environment = environment
+                    });
+
+                    status.Type = plantType;
+                    status.Environment = environment;
+
+                    totalLoaded++;
+                    _logger.LogDebug("Loaded plant {PlantId} ({Type}) from {Environment}", plantId, plantType, environment);
+                }
+
+                _logger.LogInformation("✅ Loaded {Count} plants from Firestore (all users)", totalLoaded);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load plant types from Firestore");
             }
         }
 
@@ -76,7 +134,7 @@ namespace GreenPulse.Services
 
             _mqttClient.ConnectedAsync += async e =>
             {
-                _logger.LogInformation("✅ WateringService connected to MQTT broker at {Broker}:{Port}", BROKER, PORT);
+                _logger.LogInformation("✅ WateringService connected to {Broker}:{Port}", BROKER, PORT);
 
                 var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
                     .WithTopicFilter(f => f
@@ -119,9 +177,9 @@ namespace GreenPulse.Services
                 string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
                 using var json = JsonDocument.Parse(payload);
 
-                // Only process sensor_update events
+                // Process "status" events (changed from "sensor_update")
                 if (!json.RootElement.TryGetProperty("event", out var eventProp) ||
-                    eventProp.GetString() != "sensor_update")
+                    eventProp.GetString() != "status")
                 {
                     return Task.CompletedTask;
                 }
@@ -142,25 +200,32 @@ namespace GreenPulse.Services
                     return Task.CompletedTask;
                 }
 
-                // Update or create plant status
-                var plant = _plantStatuses.GetOrAdd(plantId, new PlantStatus { PlantId = plantId });
+                // Get or create plant status
+                var plant = _plantStatuses.GetOrAdd(plantId, new PlantStatus
+                {
+                    PlantId = plantId,
+                    Type = "herb" // Default, will be updated from Firestore
+                });
+
                 plant.Humidity = humidity;
                 plant.LastUpdate = DateTime.UtcNow;
 
-                // Hysteresis logic
-                if (!plant.NeedsWater && humidity < DRY_THRESHOLD)
+                // Get thresholds for this plant type
+                var thresholds = PlantTypes.GetValueOrDefault(plant.Type, PlantTypes["default"]);
+
+                // Check if plant needs water based on its type's thresholds
+                if (!plant.NeedsWater && humidity < thresholds.MinHumidity)
                 {
                     plant.NeedsWater = true;
-                    _logger.LogWarning("⚠️ {PlantId} is too dry! Humidity: {Humidity:F1}%", plantId, humidity);
+                    _logger.LogWarning("⚠️ {PlantId} ({Type}) is too dry! Humidity: {Humidity:F1}% (min: {Min}%)",
+                        plantId, plant.Type, humidity, thresholds.MinHumidity);
                 }
-                else if (plant.NeedsWater && humidity > WET_THRESHOLD)
+                else if (plant.NeedsWater && humidity > thresholds.MaxHumidity)
                 {
                     plant.NeedsWater = false;
-                    _logger.LogInformation("✅ {PlantId} humidity back to normal: {Humidity:F1}%", plantId, humidity);
+                    _logger.LogInformation("✅ {PlantId} ({Type}) humidity back to normal: {Humidity:F1}%",
+                        plantId, plant.Type, humidity);
                 }
-
-                // Publish humidity status to dashboard topic
-                _ = PublishHumidityStatus(plantId, humidity);
             }
             catch (Exception ex)
             {
@@ -201,53 +266,21 @@ namespace GreenPulse.Services
                 {
                     action = "water",
                     plantId = plantId,
-                    amount = WATERING_AMOUNT,
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                    amount = WATERING_AMOUNT
                 };
 
                 var message = new MqttApplicationMessageBuilder()
-                    .WithTopic(SUBSCRIBE_TOPIC)
+                    .WithTopic(WATER_COMMAND_TOPIC)
                     .WithPayload(JsonSerializer.Serialize(waterCommand))
                     .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
                     .Build();
 
                 await _mqttClient.PublishAsync(message, stoppingToken);
-                _logger.LogInformation("💧 Sent watering command for {PlantId} (amount: {Amount})", plantId, WATERING_AMOUNT);
+                _logger.LogInformation("💧 Sent watering command for {PlantId} to {Topic}", plantId, WATER_COMMAND_TOPIC);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to send watering command for {PlantId}", plantId);
-            }
-        }
-
-        private async Task PublishHumidityStatus(string plantId, double humidity)
-        {
-            if (_mqttClient == null || !_mqttClient.IsConnected)
-            {
-                return;
-            }
-
-            try
-            {
-                var humidityPayload = new
-                {
-                    plantId,
-                    humidity,
-                    timestamp = DateTime.UtcNow
-                };
-
-                var message = new MqttApplicationMessageBuilder()
-                    .WithTopic($"{PUBLISH_TOPIC_PREFIX}/{plantId}")
-                    .WithPayload(JsonSerializer.Serialize(humidityPayload))
-                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-                    .Build();
-
-                await _mqttClient.PublishAsync(message);
-                _logger.LogDebug("📡 Published humidity status for {PlantId}: {Humidity:F1}%", plantId, humidity);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to publish humidity status for {PlantId}", plantId);
             }
         }
 
@@ -269,8 +302,19 @@ namespace GreenPulse.Services
     public class PlantStatus
     {
         public string PlantId { get; set; } = string.Empty;
+        public string Type { get; set; } = "herb";
+        public string Environment { get; set; } = string.Empty;
         public double Humidity { get; set; }
         public bool NeedsWater { get; set; }
         public DateTime LastUpdate { get; set; }
+    }
+
+    // Plant type thresholds
+    public class PlantThresholds
+    {
+        public double IdealPh { get; set; }
+        public double MinHumidity { get; set; }
+        public double MaxHumidity { get; set; }
+        public double DryRate { get; set; }
     }
 }
