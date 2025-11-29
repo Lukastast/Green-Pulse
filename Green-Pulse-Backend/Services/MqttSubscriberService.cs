@@ -13,9 +13,8 @@ namespace GreenPulse.Services
         private readonly FirestoreDb _firestore;
         private IMqttClient? _mqttClient;
 
-        // MQTT Config
-        private const string BROKER = "192.168.0.124"; 
-        private const int PORT = 8883;
+        private const string BROKER = "localhost";
+        private const int PORT = 1883;
         private const string USERNAME = "sensor_user";
         private const string PASSWORD = "securepass123";
         private const string TOPIC = "greenpulse/#";
@@ -50,13 +49,6 @@ namespace GreenPulse.Services
             var factory = new MqttClientFactory();
             _mqttClient = factory.CreateMqttClient();
 
-            var tlsOptions = new MqttClientTlsOptions
-            {
-                UseTls = true,
-                SslProtocol = SslProtocols.Tls12 | SslProtocols.Tls13,
-                CertificateValidationHandler = _ => true
-            };
-
             var options = new MqttClientOptionsBuilder()
                 .WithTcpServer(BROKER, PORT)
                 .WithCredentials(USERNAME, PASSWORD)
@@ -64,7 +56,6 @@ namespace GreenPulse.Services
                 .WithCleanSession()
                 .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
                 .WithTimeout(TimeSpan.FromSeconds(10))
-                .WithTlsOptions(tlsOptions)
                 .Build();
 
             _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
@@ -115,11 +106,9 @@ namespace GreenPulse.Services
                 _logger.LogDebug("📨 MQTT message on {Topic}", topic);
 
                 using var json = JsonDocument.Parse(payload);
-                
+
                 if (!json.RootElement.TryGetProperty("event", out var eventProp))
-                {
                     return Task.CompletedTask;
-                }
 
                 string eventType = eventProp.GetString()!;
 
@@ -128,27 +117,21 @@ namespace GreenPulse.Services
                     case "status":
                         _ = SaveStatusToAllUsers(json.RootElement);
                         break;
-
                     case "plant_added":
                         _ = SaveEventLog("plant_added", json.RootElement);
                         break;
-
                     case "plant_watered":
                         _ = SaveEventLog("plant_watered", json.RootElement);
                         break;
-
                     case "ph_adjusted":
                         _ = SaveEventLog("ph_adjusted", json.RootElement);
                         break;
-
                     case "temp_adjusted":
                         _ = SaveEventLog("temp_adjusted", json.RootElement);
                         break;
-
                     case "plant_dead":
                         _ = SaveEventLog("plant_dead", json.RootElement);
                         break;
-
                     default:
                         _logger.LogDebug("Unknown event: {EventType}", eventType);
                         break;
@@ -176,27 +159,26 @@ namespace GreenPulse.Services
                 double temp = data.GetProperty("temperature").GetDouble();
                 bool alive = data.GetProperty("alive").GetBoolean();
 
-                // Find all instances of this plant across all users using collection group query
-                var plantsQuery = _firestore.CollectionGroup("plants")
-                    .WhereEqualTo(FieldPath.DocumentId, plantId);
+                // Collection group query uden id-felt
+                var snapshot = await _firestore.CollectionGroup("plants").GetSnapshotAsync();
 
-                var snapshot = await plantsQuery.GetSnapshotAsync();
+                var plantDocs = snapshot.Documents
+                    .Where(doc => doc.Id == plantId)
+                    .ToList();
 
-                if (snapshot.Documents.Count == 0)
+                if (plantDocs.Count == 0)
                 {
                     _logger.LogDebug("Plant {PlantId} not found in any user's collection", plantId);
                     return;
                 }
 
-                _logger.LogDebug("Found {Count} instances of plant {PlantId}, saving to all", 
-                    snapshot.Documents.Count, plantId);
+                _logger.LogDebug("Found {Count} instances of plant {PlantId}, saving to all",
+                    plantDocs.Count, plantId);
 
-                // Save to history for each user that has this plant
-                foreach (var plantDoc in snapshot.Documents)
+                foreach (var plantDoc in plantDocs)
                 {
                     try
                     {
-                        // Save to this plant's history collection
                         var historyRef = plantDoc.Reference.Collection("history").Document();
 
                         await historyRef.SetAsync(new
@@ -216,8 +198,8 @@ namespace GreenPulse.Services
                     }
                 }
 
-                _logger.LogInformation("🔥 Saved status for plant {PlantId} to {Count} user(s)", 
-                    plantId, snapshot.Documents.Count);
+                _logger.LogInformation("🔥 Saved status for plant {PlantId} to {Count} user(s)",
+                    plantId, plantDocs.Count);
             }
             catch (Exception ex)
             {
@@ -229,10 +211,7 @@ namespace GreenPulse.Services
         {
             try
             {
-                // Save event logs to a global collection
-                var docRef = _firestore
-                    .Collection("event_logs")
-                    .Document();
+                var docRef = _firestore.Collection("event_logs").Document();
 
                 await docRef.SetAsync(new
                 {
