@@ -19,7 +19,7 @@ object MqttModule {
     @Singleton
     fun provideMqttClient(@ApplicationContext context: Context): MqttAndroidClient {
         val clientId = "greenpulse-android-${UUID.randomUUID()}"
-        val serverUri = "tcp://10.42.131.124:1883"
+        val serverUri = "tcp://10.0.2.2:1883"
 
         return MqttAndroidClient(context, serverUri, clientId)
     }
