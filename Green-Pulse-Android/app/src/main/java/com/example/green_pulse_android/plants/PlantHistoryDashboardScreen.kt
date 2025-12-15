@@ -1,6 +1,5 @@
 package com.example.green_pulse_android.plants
 
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +63,7 @@ fun PlantHistoryDashboardScreen(
     val uiState by viewModel.uiState.collectAsState()
     val colorScheme = MaterialTheme.colorScheme
 
+    val availableTimeframes by viewModel.availableTimeframes.collectAsState()
     var selectedMetric by remember { mutableStateOf("Humidity") }
     val metrics = listOf("Humidity", "pH", "Temperature")
 
@@ -129,7 +129,7 @@ fun PlantHistoryDashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    listOf("6h", "1d", "1week").forEach { timeframe ->
+                    availableTimeframes.forEach { timeframe ->
                         Button(
                             onClick = { viewModel.selectTimeframe(timeframe) },
                             modifier = Modifier.weight(1f),
@@ -137,7 +137,9 @@ fun PlantHistoryDashboardScreen(
                                 containerColor = if (uiState.selectedTimeframe == timeframe)
                                     colorScheme.primary else colorScheme.surfaceVariant
                             )
-                        ) { Text(timeframe) }
+                        ) {
+                            Text(timeframe)
+                        }
                     }
                 }
 
@@ -165,6 +167,7 @@ fun PlantHistoryDashboardScreen(
                         CircularProgressIndicator()
                     }
                 }
+
                 uiState.history.isNotEmpty() -> {
                     Column(
                         modifier = Modifier.fillMaxSize(),
@@ -215,31 +218,47 @@ fun PlantHistoryDashboardScreen(
                                     circleRadius = 5f
                                     setDrawValues(false)
                                     mode = LineDataSet.Mode.CUBIC_BEZIER
-                                    fillDrawable = android.graphics.drawable.GradientDrawable().apply {
-                                        setColor(0x20FFFFFF)
-                                    }
+                                    fillDrawable =
+                                        android.graphics.drawable.GradientDrawable().apply {
+                                            setColor(0x20FFFFFF)
+                                        }
                                     setDrawFilled(true)
                                     axisDependency = YAxis.AxisDependency.LEFT
                                 }
 
                                 chart.data = LineData(dataSet)
 
-                                val labels = uiState.history.reversed().take(10).map { history ->
-                                    SimpleDateFormat("HH:mm", Locale.getDefault())
-                                        .format(history.timestamp.toDate())
+                                val labelCount = when (uiState.history.size) {
+                                    in 0..50 -> uiState.history.size
+                                    in 51..200 -> uiState.history.size / 10
+                                    else -> uiState.history.size / 20
                                 }
+
+                                val labels = uiState.history.reversed().mapIndexedNotNull { index, history ->
+                                    if (index % (uiState.history.size / labelCount.coerceAtLeast(1)) == 0 || index == uiState.history.size - 1) {
+                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(history.timestamp.toDate())
+                                    } else null
+                                }.filterNotNull()
                                 chart.xAxis.valueFormatter = IndexAxisValueFormatter(labels)
                                 chart.xAxis.labelCount = labels.size
+                                chart.xAxis.granularity = 1f
 
                                 chart.axisLeft.apply {
-                                    axisMinimum = 0f
+                                    axisMinimum = when (selectedMetric) {
+                                        "Humidity" -> 0f
+                                        "pH" -> 4f
+                                        "Temperature" -> 10f
+                                        else -> 0f
+                                    }
                                     axisMaximum = when (selectedMetric) {
                                         "Humidity" -> 100f
-                                        "pH" -> 14f
-                                        "Temperature" -> 50f
+                                        "pH" -> 9f
+                                        "Temperature" -> 40f
                                         else -> 100f
                                     }
                                 }
+                                chart.xAxis.labelCount = 8
+                                chart.xAxis.granularity = 1f
 
                                 chart.notifyDataSetChanged()
                                 chart.invalidate()
