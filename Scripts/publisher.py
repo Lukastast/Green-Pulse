@@ -12,7 +12,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 # ---------------- MQTT CONFIG ---------------- #
-BROKER = "host.docker.internal"  # Private EMQX broker
+BROKER = "host.docker.internal"  # docker localhost
 PORT = 8883
 USERNAME = "sensor_user" 
 PASSWORD = "securepass123"#securepass123 appsecure456

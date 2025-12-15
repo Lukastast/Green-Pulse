@@ -3,7 +3,7 @@ from paho.mqtt.client import CallbackAPIVersion
 import uuid
 import ssl
 
-BROKER = "192.168.0.124"
+BROKER = "localhost"
 PORT = 8883
 USERNAME = "app_user"
 PASSWORD = "appsecure456"

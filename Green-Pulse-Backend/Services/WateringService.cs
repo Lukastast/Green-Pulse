@@ -14,7 +14,7 @@ namespace GreenPulse.Services
         private readonly ConcurrentDictionary<string, PlantStatus> _plantStatuses = new();
 
         // MQTT Config
-        private const string BROKER = "192.168.0.124"; // or "10.42.131.124"
+        private const string BROKER = "localhost"; // or "10.42.131.124"
         private const int PORT = 8883;
         private const string USERNAME = "sensor_user";
         private const string PASSWORD = "securepass123";
