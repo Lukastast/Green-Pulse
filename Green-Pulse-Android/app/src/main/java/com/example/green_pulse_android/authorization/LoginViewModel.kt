@@ -23,7 +23,6 @@ import javax.inject.Inject
 class LoginViewModel @Inject constructor(
     private val accountService: AccountService
 ) : GreenPulseViewModel() {
-    // Backing properties to avoid state updates from other classes
     private val _email = MutableStateFlow("")
     val email: StateFlow<String> = _email.asStateFlow()
 

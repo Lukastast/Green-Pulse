@@ -16,13 +16,9 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val accountService: AccountService,
-    //private val userRepository: UserRepository  // Inject the repository
 ) : GreenPulseViewModel() {
     private val _user = MutableStateFlow(User())
     val user: StateFlow<User> = _user.asStateFlow()
-   // private val _userGameData = MutableStateFlow<UserGameData?>(null)
-   // val userGameData: StateFlow<UserGameData?> = _userGameData.asStateFlow()
-
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 

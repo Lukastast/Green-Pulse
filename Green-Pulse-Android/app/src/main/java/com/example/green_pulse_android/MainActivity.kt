@@ -106,9 +106,8 @@ fun NavGraphBuilder.GreenPulseGraph(appState: GreenPulseAppState) {
     ) { backStackEntry ->
         val environment = backStackEntry.arguments?.getString("environment") ?: "Indoors"
         CreatePlantScreen(
-            environment = environment,  // Pass to screen
+            environment = environment,
             onCreate = { newPlant ->
-                // Refresh or navigate back
                 appState.navigate(PLANT_VIEW_SCREEN)
             },
             onCancel = { appState.navigate(PLANT_VIEW_SCREEN) }

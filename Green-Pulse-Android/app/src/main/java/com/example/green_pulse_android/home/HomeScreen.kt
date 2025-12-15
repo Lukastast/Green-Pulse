@@ -27,13 +27,9 @@ fun HomeScreen(
     openScreen: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    //LaunchedEffect(Unit) { viewModel.initialize(restartApp) }
-
-    //val userGameData by viewModel.userGameData.collectAsState()
     val error by viewModel.error.collectAsState()
     val user by viewModel.user.collectAsState(initial = User())
 
-        // Main centered content
         Column(
             modifier = Modifier
                 .fillMaxSize()

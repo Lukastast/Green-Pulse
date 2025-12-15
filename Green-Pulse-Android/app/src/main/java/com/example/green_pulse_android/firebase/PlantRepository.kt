@@ -37,7 +37,6 @@ class PlantRepository @Inject constructor(
 
             val plantToSave = plant.copy(createdAt = Timestamp.now())
             plantRef.set(plantToSave).await()
-            // Initial history
             val initialHistory = PlantHistory(
                 alive = true,
                 humidity = plant.humidity,
@@ -76,9 +75,8 @@ class PlantRepository @Inject constructor(
 
                 val envPlants = snapshot?.toObjects(FirestorePlant::class.java) ?: emptyList()
 
-                // Remove old plants from this env, add new ones
                 allPlants.removeAll { it.environment == env }
-                allPlants.addAll(envPlants.map { it.copy(environment = env) }) // ensure env field
+                allPlants.addAll(envPlants.map { it.copy(environment = env) })
 
                 Log.d("PlantRepo", "Updated $env → total plants: ${allPlants.size}")
                 onUpdate(allPlants.toList())
@@ -99,7 +97,6 @@ class PlantRepository @Inject constructor(
                 .collection("plants")
                 .document(plantId)
 
-            // Delete the plant document (and all its history subcollection automatically)
             plantRef.delete().await()
 
             Log.d("PlantRepo", "Deleted plant $plantId from $environment")
@@ -124,7 +121,7 @@ class PlantRepository @Inject constructor(
             val plantRef = firestore
                 .collection("users").document(uid)
                 .collection("environments").document(environment)
-                .collection("plants").document(plantId)  // ← THIS WAS MISSING!
+                .collection("plants").document(plantId)
 
             plantRef.update(
                 "humidity", humidity,
@@ -133,7 +130,6 @@ class PlantRepository @Inject constructor(
                 "alive", alive
             ).await()
 
-            // Append to history
             val historyEntry = PlantHistory(
                 timestamp = Timestamp.now(),
                 alive = alive,
@@ -161,7 +157,7 @@ class PlantRepository @Inject constructor(
             val historyRef = firestore
                 .collection("users").document(uid)
                 .collection("environments").document(environment)
-                .collection("plants").document(plantId)  // ← THIS WAS MISSING!
+                .collection("plants").document(plantId)
                 .collection("history")
 
             historyRef.add(history).await()
@@ -177,9 +173,9 @@ class PlantRepository @Inject constructor(
             val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
 
             val plantDoc = firestore
-                .collection("users").document(uid)                    // ← document
-                .collection("environments").document(environment)     // ← document
-                .collection("plants").document(plantId)                // ← document
+                .collection("users").document(uid)
+                .collection("environments").document(environment)
+                .collection("plants").document(plantId)
 
             val snapshot = plantDoc.get().await()
             if (snapshot.exists()) {

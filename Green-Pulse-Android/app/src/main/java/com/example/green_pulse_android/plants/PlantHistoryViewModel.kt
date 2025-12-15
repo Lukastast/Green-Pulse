@@ -35,7 +35,6 @@ class PlantHistoryViewModel @Inject constructor(
     )
 
     init {
-        // Default to first env
         _uiState.update { it.copy(selectedEnvironment = "Indoors") }
     }
 
@@ -51,8 +50,7 @@ class PlantHistoryViewModel @Inject constructor(
     fun loadPlantsForEnv(env: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            // Assume repo has getPlantsForEnv(env: String) -> List<FirestorePlant>
-            val plants = plantRepository.getPlantsForEnv(env)  // Implement in repo
+            val plants = plantRepository.getPlantsForEnv(env)
             _uiState.update {
                 it.copy(
                     plantsInEnv = plants,
@@ -76,7 +74,6 @@ class PlantHistoryViewModel @Inject constructor(
             )
         }
         loadPlantById(plantId, uiState.value.selectedEnvironment)
-        // Auto-load history for selected plant
         loadHistory(plantId, uiState.value.selectedEnvironment)
     }
 
@@ -109,7 +106,6 @@ class PlantHistoryViewModel @Inject constructor(
     private fun loadPlantById(plantId: String, environment: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            // Assume repo has getPlantById(env: String, id: String) -> FirestorePlant?
             val plantResult = plantRepository.getPlantById(environment, plantId)
             plantResult.fold(
                 onSuccess = { plant ->
@@ -129,7 +125,7 @@ class PlantHistoryViewModel @Inject constructor(
         }
     }
     private fun getLimitForTimeframe(): Int = when (uiState.value.selectedTimeframe) {
-        "6h" -> 6 * 6  // Assume hourly updates
+        "6h" -> 6 * 6
         "1d" -> 24
         "1week" -> 168
         else -> 24

@@ -29,7 +29,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -48,17 +51,21 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlantHistoryDashboardScreen(
     onBack: () -> Unit,
-    environment: String = "",  // Nav arg
-    plantId: String = "",  // Nav arg
+    environment: String = "",
+    plantId: String = "",
     viewModel: PlantHistoryViewModel = hiltViewModel()
 ) {
     val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val colorScheme = MaterialTheme.colorScheme
+
+    var selectedMetric by remember { mutableStateOf("Humidity") }
+    val metrics = listOf("Humidity", "pH", "Temperature")
 
     LaunchedEffect(environment, plantId) {
         if (environment.isNotEmpty() && environment != uiState.selectedEnvironment) {
@@ -89,7 +96,6 @@ fun PlantHistoryDashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Environment Selection
             ExposedDropdownMenuBox(
                 expanded = uiState.expandedEnv,
                 onExpandedChange = { viewModel.toggleEnvDropdown() }
@@ -118,37 +124,6 @@ fun PlantHistoryDashboardScreen(
                 }
             }
 
-            // Plant Selection (visible after env selected)
-            if (uiState.selectedEnvironment.isNotEmpty()) {
-                ExposedDropdownMenuBox(
-                    expanded = uiState.expandedPlant,
-                    onExpandedChange = { viewModel.togglePlantDropdown() }
-                ) {
-                    OutlinedTextField(
-                        value = uiState.selectedPlantName,
-                        onValueChange = { },
-                        readOnly = true,
-                        label = { Text("Plant") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = uiState.expandedPlant) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = uiState.expandedPlant,
-                        onDismissRequest = { viewModel.togglePlantDropdown() }
-                    ) {
-                        uiState.plantsInEnv.forEach { plant ->
-                            DropdownMenuItem(
-                                text = { Text(plant.name) },
-                                onClick = {
-                                    viewModel.selectPlant(plant.id)
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Timeframe Selection (buttons)
             if (uiState.selectedPlantId.isNotEmpty()) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -159,22 +134,34 @@ fun PlantHistoryDashboardScreen(
                             onClick = { viewModel.selectTimeframe(timeframe) },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (uiState.selectedTimeframe == timeframe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                                containerColor = if (uiState.selectedTimeframe == timeframe)
+                                    colorScheme.primary else colorScheme.surfaceVariant
                             )
-                        ) {
-                            Text(timeframe)
-                        }
+                        ) { Text(timeframe) }
+                    }
+                }
+
+                Text("Select metric:", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    metrics.forEach { metric ->
+                        Button(
+                            onClick = { selectedMetric = metric },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedMetric == metric)
+                                    colorScheme.primary else colorScheme.surfaceVariant
+                            )
+                        ) { Text(metric) }
                     }
                 }
             }
 
-            // Loading/Graph Section
             when {
                 uiState.isLoading -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 }
@@ -184,10 +171,11 @@ fun PlantHistoryDashboardScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "History for ${uiState.selectedPlantName}",
+                            text = "$selectedMetric History for ${uiState.selectedPlantName}",
                             style = MaterialTheme.typography.headlineSmall,
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(vertical = 8.dp)
                         )
+
                         AndroidView(
                             factory = { context ->
                                 LineChart(context).apply {
@@ -196,80 +184,77 @@ fun PlantHistoryDashboardScreen(
                                     isDragEnabled = true
                                     setScaleEnabled(true)
                                     setPinchZoom(true)
-                                    legend.isEnabled = true  // Show legend for multiple lines
+                                    legend.isEnabled = false
+                                    xAxis.position = XAxis.XAxisPosition.BOTTOM
+                                    xAxis.granularity = 1f
+                                    axisRight.isEnabled = false
+                                    axisLeft.axisMinimum = 0f
                                 }
                             },
                             update = { chart ->
-                                // Humidity dataset (primary Y: 0-100)
-                                val humidityEntries = uiState.history.mapIndexed { index, history ->
-                                    Entry(index.toFloat(), history.humidity)
-                                }
-                                val humidityDataSet = LineDataSet(humidityEntries, "Humidity (%)").apply {
-                                    color = colorScheme.primary.toArgb()
-                                    setDrawCircles(true)
-                                    lineWidth = 2f
-                                    setDrawValues(false)
-                                    mode = LineDataSet.Mode.CUBIC_BEZIER
-                                    axisDependency = YAxis.AxisDependency.LEFT  // Left Y-axis
-                                }
-
-                                // pH dataset (secondary Y: 0-14, right axis)
-                                val phEntries = uiState.history.mapIndexed { index, history ->
-                                    Entry(index.toFloat(), history.ph)
-                                }
-                                val phDataSet = LineDataSet(phEntries, "pH").apply {
-                                    color = colorScheme.secondary.toArgb()
-                                    setDrawCircles(true)
-                                    lineWidth = 2f
-                                    setDrawValues(false)
-                                    mode = LineDataSet.Mode.CUBIC_BEZIER
-                                    axisDependency = YAxis.AxisDependency.RIGHT  // Right Y-axis
-                                }
-
-                                // Temperature dataset (left Y, but normalized or separate scale if needed)
-                                val tempEntries = uiState.history.mapIndexed { index, history ->
-                                    Entry(index.toFloat(), history.temperature)
-                                }
-                                val tempDataSet = LineDataSet(tempEntries, "Temperature (°C)").apply {
-                                    color = colorScheme.tertiary.toArgb()
-                                    setDrawCircles(true)
-                                    lineWidth = 2f
-                                    setDrawValues(false)
-                                    mode = LineDataSet.Mode.CUBIC_BEZIER
-                                    axisDependency = YAxis.AxisDependency.LEFT  // Left Y-axis (shared with humidity)
-                                }
-
-                                val lineData = LineData(humidityDataSet, phDataSet, tempDataSet)
-                                chart.data = lineData
-
-                                // X-axis labels (time)
-                                chart.xAxis.valueFormatter = IndexAxisValueFormatter(
-                                    uiState.history.takeLast(7).map { history ->
-                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(history.timestamp.toDate())
+                                val entries = uiState.history.mapIndexed { index, history ->
+                                    val value = when (selectedMetric) {
+                                        "Humidity" -> history.humidity
+                                        "pH" -> history.ph
+                                        "Temperature" -> history.temperature
+                                        else -> 0f
                                     }
-                                )
-                                chart.xAxis.position = XAxis.XAxisPosition.BOTTOM
+                                    Entry(index.toFloat(), value)
+                                }
 
-                                // Y-axes setup
-                                chart.axisLeft.axisMinimum = 0f
-                                chart.axisLeft.axisMaximum = 100f  // For humidity/temp
-                                chart.axisRight.axisMinimum = 0f
-                                chart.axisRight.axisMaximum = 14f  // For pH
-                                chart.axisRight.isEnabled = true  // Enable right axis for pH
+                                val dataSet = LineDataSet(entries, selectedMetric).apply {
+                                    color = when (selectedMetric) {
+                                        "Humidity" -> colorScheme.primary.toArgb()
+                                        "pH" -> colorScheme.secondary.toArgb()
+                                        "Temperature" -> colorScheme.tertiary.toArgb()
+                                        else -> colorScheme.primary.toArgb()
+                                    }
+                                    setCircleColor(color)
+                                    setDrawCircleHole(false)
+                                    lineWidth = 3.5f
+                                    circleRadius = 5f
+                                    setDrawValues(false)
+                                    mode = LineDataSet.Mode.CUBIC_BEZIER
+                                    fillDrawable = android.graphics.drawable.GradientDrawable().apply {
+                                        setColor(0x20FFFFFF)
+                                    }
+                                    setDrawFilled(true)
+                                    axisDependency = YAxis.AxisDependency.LEFT
+                                }
+
+                                chart.data = LineData(dataSet)
+
+                                val labels = uiState.history.reversed().take(10).map { history ->
+                                    SimpleDateFormat("HH:mm", Locale.getDefault())
+                                        .format(history.timestamp.toDate())
+                                }
+                                chart.xAxis.valueFormatter = IndexAxisValueFormatter(labels)
+                                chart.xAxis.labelCount = labels.size
+
+                                chart.axisLeft.apply {
+                                    axisMinimum = 0f
+                                    axisMaximum = when (selectedMetric) {
+                                        "Humidity" -> 100f
+                                        "pH" -> 14f
+                                        "Temperature" -> 50f
+                                        else -> 100f
+                                    }
+                                }
 
                                 chart.notifyDataSetChanged()
                                 chart.invalidate()
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
+                                .height(400.dp)
+                                .padding(8.dp)
                         )
                     }
                 }
                 else -> {
                     Text(
-                        text = "No history data available. Select a plant and timeframe.",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "No history data available.\nSelect a plant and wait for updates.",
+                        style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     )

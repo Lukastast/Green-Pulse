@@ -7,10 +7,10 @@ const val ERROR_TAG = "PixelFit APP ERROR"
 const val UNEXPECTED_CREDENTIAL = "Unexpected type of credential"
 
 object AuthErrorMapper {
-    // Common default message
+
     private const val DEFAULT_ERROR = "Operation failed"
 
-    // Error mappings for login
+
     val loginErrorMappings = mapOf(
         "ERROR_INVALID_EMAIL" to "Invalid email",
         "ERROR_WRONG_PASSWORD" to "Incorrect password",
@@ -19,7 +19,7 @@ object AuthErrorMapper {
         "ERROR_INVALID_CREDENTIAL" to "Invalid email or password"
     )
 
-    // Error mappings for signup
+
     val signupErrorMappings = mapOf(
         "ERROR_INVALID_EMAIL" to "Invalid email format",
         "ERROR_EMAIL_ALREADY_IN_USE" to "Email already in use",

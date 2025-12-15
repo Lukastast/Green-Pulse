@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,7 +63,6 @@ fun PlantViewScreen(
     val isLoading by viewModel.isLoading
     val environments = listOf("Indoors", "Outdoors", "Greenhouse")
 
-    // For delete confirmation dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
     var plantToDelete by remember { mutableStateOf<Plant?>(null) }
 
@@ -73,11 +73,12 @@ fun PlantViewScreen(
             CircularProgressIndicator()
         }
     } else {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            environments.forEach { env ->
+            items(environments) { env ->
                 val envPlants = plantsByEnvironment[env] ?: emptyList()
 
                 Card(
@@ -96,7 +97,11 @@ fun PlantViewScreen(
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                             IconButton(onClick = { openScreen("$CREATE_PLANT_SCREEN/$env") }) {
-                                Icon(Icons.Default.Add, contentDescription = "Add Plant", tint = MaterialTheme.colorScheme.onPrimary)
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "Add Plant",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
                             }
                         }
 
@@ -104,31 +109,31 @@ fun PlantViewScreen(
 
                         if (envPlants.isEmpty()) {
                             Box(
-                                modifier = Modifier.fillMaxWidth().height(100.dp),
+                                modifier = Modifier.fillMaxWidth().height(120.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("No plants in $env yet. Add one!", color = MaterialTheme.colorScheme.onPrimary)
+                                Text(
+                                    "No plants in $env yet. Add one!",
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
                             }
                         } else {
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp)
+                                contentPadding = PaddingValues(horizontal = 8.dp)
                             ) {
                                 items(envPlants) { plant ->
                                     val plantColor = envColors[env] ?: MaterialTheme.colorScheme.surface
 
                                     Card(
                                         modifier = Modifier
-                                            .width(280.dp)  // ← FIXED WIDTH (instead of stretching)
-                                            .clickable {
-                                                openScreen("$PLANT_DASHBOARD_SCREEN/$env/${plant.id}")
-                                            },
+                                            .width(280.dp)
+                                            .clickable { openScreen("$PLANT_DASHBOARD_SCREEN/$env/${plant.id}") },
                                         colors = CardDefaults.cardColors(containerColor = plantColor),
                                         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                                         shape = RoundedCornerShape(16.dp)
                                     ) {
                                         Box(modifier = Modifier.fillMaxWidth()) {
-                                            // Delete button top-right
                                             IconButton(
                                                 onClick = {
                                                     plantToDelete = plant
@@ -136,18 +141,14 @@ fun PlantViewScreen(
                                                 },
                                                 modifier = Modifier.align(Alignment.TopEnd)
                                             ) {
-                                                Icon(
-                                                    Icons.Default.Delete,
-                                                    contentDescription = "Delete",
-                                                    tint = Color.Red.copy(alpha = 0.7f)
-                                                )
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
                                             }
 
                                             Column(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .padding(16.dp)
-                                                    .padding(top = 32.dp), // space for delete button
+                                                    .padding(top = 32.dp),
                                                 horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
                                                 Text(
@@ -160,9 +161,9 @@ fun PlantViewScreen(
                                                 Spacer(modifier = Modifier.height(12.dp))
 
                                                 if (plant.alive) {
-                                                    StatRow("Hum:", "${plant.humidity.toInt()}%", progress = plant.humidity / 100f)
-                                                    StatRow("pH:", plant.ph.toString(), progress = plant.ph / 14f)
-                                                    StatRow("Temp:", "${plant.temperature.toInt()}°C", progress = plant.temperature / 50f)
+                                                    StatRow("Hum:", "${plant.humidity.toInt()}%", plant.humidity / 100f)
+                                                    StatRow("pH:", plant.ph.toString(), plant.ph / 14f)
+                                                    StatRow("Temp:", "${plant.temperature.toInt()}°C", plant.temperature / 50f)
                                                 } else {
                                                     Text("Plant has died", color = Color.Red, style = MaterialTheme.typography.bodyLarge)
                                                 }
@@ -178,12 +179,11 @@ fun PlantViewScreen(
         }
     }
 
-    // Delete Confirmation Dialog
     if (showDeleteDialog && plantToDelete != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("Delete Plant?") },
-            text = { Text("Are you sure you want to delete ${plantToDelete!!.name}?") },
+            text = { Text("Are you sure you want to delete ${plantToDelete!!.name}? This cannot be undone.") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deletePlant(plantToDelete!!)
@@ -201,7 +201,6 @@ fun PlantViewScreen(
         )
     }
 }
-
 @Composable
 private fun StatRow(label: String, value: String, progress: Float) {
     Row(

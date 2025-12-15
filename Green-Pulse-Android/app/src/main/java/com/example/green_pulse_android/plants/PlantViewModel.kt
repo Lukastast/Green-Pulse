@@ -155,7 +155,7 @@ class PlantViewModel @Inject constructor(
         Log.d("PlantViewModel", "Refresh triggered")
         _isLoading.value = true
         viewModelScope.launch {
-            kotlinx.coroutines.delay(200) // Optional: show spinner briefly
+            kotlinx.coroutines.delay(200)
             _isLoading.value = false
         }
     }
@@ -175,7 +175,6 @@ class PlantViewModel @Inject constructor(
                 this.alive = alive
             }
 
-            // Update Firestore + Add history entry
             viewModelScope.launch {
                 plantRepository.updatePlantStats(plant.id, plant.environment, humidity, ph, temperature, alive)
                 plantRepository.addHistoryEntry(

@@ -131,20 +131,16 @@ fun ExitAppCard(onSignOutClick: () -> Unit) {
 
 @Composable
 fun GoogleLinkCard(
-    user: User?, // Assuming User is your user profile model with isLinkedWithGoogle: Boolean
+    user: User?,
     onLinkClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
 
-    //if (user == null || user.isLinkedWithGoogle) {
-    //  return
-    // }
-
     var showLinkDialog by remember { mutableStateOf(false) }
 
     AccountCenterCard(
-        stringResource(R.string.link_google_account), // Assume you have this string resource
-        Icons.Filled.Link, // Or appropriate icon, e.g., Icons.Filled.AccountCircle for Google
+        stringResource(R.string.link_google_account),
+        Icons.Filled.Link,
         modifier.card()
     ) {
         showLinkDialog = true
@@ -152,7 +148,7 @@ fun GoogleLinkCard(
 
     if (showLinkDialog) {
         AlertDialog(
-            title = { Text(stringResource(R.string.link_google_title)) }, // e.g., "Link Google Account"
+            title = { Text(stringResource(R.string.link_google_title)) },
             text = { Text(stringResource(R.string.link_google_description)) },
             dismissButton = {
                 Button(onClick = { showLinkDialog = false }) {
@@ -162,11 +158,11 @@ fun GoogleLinkCard(
             confirmButton = {
                 Button(
                     onClick = {
-                        onLinkClick() // This should trigger Google sign-in flow to get idToken, then call linkAccountWithGoogle
+                        onLinkClick()
                         showLinkDialog = false
                     }
                 ) {
-                    Text(text = stringResource(R.string.link_google)) // e.g., "Link Account"
+                    Text(text = stringResource(R.string.link_google))
                 }
             },
             onDismissRequest = { showLinkDialog = false }

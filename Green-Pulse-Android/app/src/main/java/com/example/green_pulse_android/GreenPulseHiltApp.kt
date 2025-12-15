@@ -10,7 +10,7 @@ import dagger.hilt.android.HiltAndroidApp
 @HiltAndroidApp class GreenPulseHiltApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        FirebaseApp.initializeApp(this)  // Ensures Firebase is ready before Hilt
+        FirebaseApp.initializeApp(this)
 
         val firestore = Firebase.firestore
         firestore.clearPersistence().addOnCompleteListener { task ->
