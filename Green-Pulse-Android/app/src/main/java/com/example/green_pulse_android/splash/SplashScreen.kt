@@ -34,12 +34,12 @@ fun SplashScreen(
 
     AnimatedVisibility(
         visible = visible,
-        exit = fadeOut(animationSpec = tween(durationMillis = 500))  // 0.5-second fade out
+        exit = fadeOut(animationSpec = tween(durationMillis = 500))
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.primary)  // Green background from theme
+                .background(MaterialTheme.colorScheme.primary)
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -51,19 +51,18 @@ fun SplashScreen(
                     style = MaterialTheme.typography.headlineLarge.copy(
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary  // White/contrasting text
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                 )
             }
         }
     }
 
-    // Logic: Check auth, delay, fade out, then navigate
     LaunchedEffect(Unit) {
         viewModel.checkAuthState { isAuthenticated ->
-            delay(1000)  // 1-second delay
-            visible = false  // Trigger fade out
-            delay(500)  // Wait for animation to finish
+            delay(1000)
+            visible = false
+            delay(500)
             val targetRoute = if (isAuthenticated) "home" else "login"
             navController.navigate(targetRoute) {
                 popUpTo(SPLASH_SCREEN) { inclusive = true }

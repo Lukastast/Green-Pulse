@@ -10,8 +10,10 @@ import com.google.firebase.firestore.Query
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.random.Random
 
 @Singleton
 class PlantRepository @Inject constructor(
@@ -37,7 +39,6 @@ class PlantRepository @Inject constructor(
 
             val plantToSave = plant.copy(createdAt = Timestamp.now())
             plantRef.set(plantToSave).await()
-            // Initial history
             val initialHistory = PlantHistory(
                 alive = true,
                 humidity = plant.humidity,
@@ -76,9 +77,8 @@ class PlantRepository @Inject constructor(
 
                 val envPlants = snapshot?.toObjects(FirestorePlant::class.java) ?: emptyList()
 
-                // Remove old plants from this env, add new ones
                 allPlants.removeAll { it.environment == env }
-                allPlants.addAll(envPlants.map { it.copy(environment = env) }) // ensure env field
+                allPlants.addAll(envPlants.map { it.copy(environment = env) })
 
                 Log.d("PlantRepo", "Updated $env → total plants: ${allPlants.size}")
                 onUpdate(allPlants.toList())
@@ -99,7 +99,6 @@ class PlantRepository @Inject constructor(
                 .collection("plants")
                 .document(plantId)
 
-            // Delete the plant document (and all its history subcollection automatically)
             plantRef.delete().await()
 
             Log.d("PlantRepo", "Deleted plant $plantId from $environment")
@@ -124,7 +123,7 @@ class PlantRepository @Inject constructor(
             val plantRef = firestore
                 .collection("users").document(uid)
                 .collection("environments").document(environment)
-                .collection("plants").document(plantId)  // ← THIS WAS MISSING!
+                .collection("plants").document(plantId)
 
             plantRef.update(
                 "humidity", humidity,
@@ -133,7 +132,6 @@ class PlantRepository @Inject constructor(
                 "alive", alive
             ).await()
 
-            // Append to history
             val historyEntry = PlantHistory(
                 timestamp = Timestamp.now(),
                 alive = alive,
@@ -161,7 +159,7 @@ class PlantRepository @Inject constructor(
             val historyRef = firestore
                 .collection("users").document(uid)
                 .collection("environments").document(environment)
-                .collection("plants").document(plantId)  // ← THIS WAS MISSING!
+                .collection("plants").document(plantId)
                 .collection("history")
 
             historyRef.add(history).await()
@@ -177,9 +175,9 @@ class PlantRepository @Inject constructor(
             val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
 
             val plantDoc = firestore
-                .collection("users").document(uid)                    // ← document
-                .collection("environments").document(environment)     // ← document
-                .collection("plants").document(plantId)                // ← document
+                .collection("users").document(uid)
+                .collection("environments").document(environment)
+                .collection("plants").document(plantId)
 
             val snapshot = plantDoc.get().await()
             if (snapshot.exists()) {
@@ -198,20 +196,23 @@ class PlantRepository @Inject constructor(
     suspend fun getPlantHistory(
         plantId: String,
         environment: String,
-        limit: Int = 50
+        limit: Int? = null
     ): Result<List<PlantHistory>> = withContext(Dispatchers.IO) {
         return@withContext try {
             val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not authenticated"))
 
-            val historyQuery = firestore
+            var query = firestore
                 .collection("users").document(uid)
                 .collection("environments").document(environment)
                 .collection("plants").document(plantId)
-                .collection("history")                                 // ← Now valid collection!
+                .collection("history")
                 .orderBy("timestamp", Query.Direction.DESCENDING)
-                .limit(limit.toLong())
 
-            val snapshots = historyQuery.get().await()
+            if (limit != null) {
+                query = query.limit(limit.toLong())
+            }
+
+            val snapshots = query.get().await()
             val history = snapshots.toObjects(PlantHistory::class.java)
             Result.success(history)
         } catch (e: Exception) {
@@ -234,4 +235,81 @@ class PlantRepository @Inject constructor(
             emptyList()
         }
     }
+
+    suspend fun createTestPlantWithHistory(
+        environment: String = "Indoors",
+        name: String = "Test Plant",
+        type: String = "herb"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Not logged in"))
+
+            val plantId = UUID.randomUUID().toString()
+
+            val plant = FirestorePlant(
+                id = plantId,
+                name = name,
+                type = type,
+                environment = environment,
+                humidity = 60f,
+                ph = 6.5f,
+                temperature = 22f,
+                alive = true,
+                createdAt = Timestamp.now()
+            )
+
+            val plantRef = firestore
+                .collection("users").document(uid)
+                .collection("environments").document(environment)
+                .collection("plants").document(plantId)
+
+            // Create the plant
+            plantRef.set(plant).await()
+
+            // Generate test history
+            val now = System.currentTimeMillis()
+            val entries = mutableListOf<PlantHistory>()
+
+            // 10 minutes of data (40 entries, every 15 seconds)
+            repeat(40) { i ->
+                val timestamp = Timestamp((now - (i * 15 * 1000)) / 1000, 0)
+                entries.add(
+                    PlantHistory(
+                        timestamp = timestamp,
+                        humidity = 50f + Random.nextFloat() * 20f,  // 50-70%
+                        ph = 6.0f + Random.nextFloat() * 1.5f,      // 6.0-7.5
+                        temperature = 20f + Random.nextFloat() * 8f, // 20-28°C
+                        alive = true
+                    )
+                )
+            }
+
+            // Add 6 hours more (up to ~1440 total)
+            repeat(1400) { i ->
+                val offset = 40 + i
+                val timestamp = Timestamp((now - (offset * 15 * 1000)) / 1000, 0)
+                entries.add(
+                    PlantHistory(
+                        timestamp = timestamp,
+                        humidity = 40f + Random.nextFloat() * 40f,
+                        ph = 5.5f + Random.nextFloat() * 2f,
+                        temperature = 18f + Random.nextFloat() * 12f,
+                        alive = if (i > 1200) false else true  // Dies near the end
+                    )
+                )
+            }
+
+            // Save all history entries
+            entries.forEach { entry ->
+                plantRef.collection("history").add(entry).await()
+            }
+
+            Log.d("TestPlant", "Created test plant $plantId with ${entries.size} history entries")
+            Result.success(plantId)
+        } catch (e: Exception) {
+            Log.e("TestPlant", "Failed to create test plant", e)
+            Result.failure(e)
+        }
+    }
+
 }

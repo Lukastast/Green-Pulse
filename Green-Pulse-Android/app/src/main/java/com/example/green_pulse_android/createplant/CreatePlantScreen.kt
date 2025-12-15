@@ -62,11 +62,10 @@ fun CreatePlantScreen(
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primary   // Or Color(0xFF4CAF50) for a specific shade
+                containerColor = MaterialTheme.colorScheme.primary
             )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Top row with back button and title
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -86,7 +85,7 @@ fun CreatePlantScreen(
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
-                    Spacer(modifier = Modifier.width(48.dp))  // Balance the icon space
+                    Spacer(modifier = Modifier.width(48.dp))
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -99,7 +98,6 @@ fun CreatePlantScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Type Dropdown
                 ExposedDropdownMenuBox(
                     expanded = expandedType,
                     onExpandedChange = { expandedType = !expandedType }

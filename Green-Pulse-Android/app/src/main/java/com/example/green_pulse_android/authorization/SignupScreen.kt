@@ -171,11 +171,3 @@ fun SignupScreen(
         }
     }
 }
-
-@Preview(showBackground = true, showSystemUi = true)
-@Composable
-fun AuthPreview() {
-    GreenPulseAndroidTheme() {
-       // SignupScreen({ _, _ -> })
-    }
-}

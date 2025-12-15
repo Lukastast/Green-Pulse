@@ -33,7 +33,6 @@ object MqttModule {
             connectionTimeout = 10
             userName = "sensor_user"
             password = "securepass123".toCharArray()
-            // Add TLS later if needed
         }
     }
 }

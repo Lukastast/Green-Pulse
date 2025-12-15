@@ -10,10 +10,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class GreenPulseActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()       // Uncomment the following line if you want to run
-        // against the Firebase Local Emulator Suite:
-        // configureFirebaseServices()
-
+        enableEdgeToEdge()
         setContent { GreenPulseApp() }
     }
 }

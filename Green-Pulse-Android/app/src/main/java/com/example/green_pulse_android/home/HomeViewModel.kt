@@ -1,8 +1,10 @@
 package com.example.green_pulse_android.home
 
+import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.example.green_pulse_android.GreenPulseViewModel
 import com.example.green_pulse_android.firebase.AccountService
+import com.example.green_pulse_android.firebase.PlantRepository
 import com.example.green_pulse_android.helpers.LOGIN_SCREEN
 import com.example.green_pulse_android.helpers.SPLASH_SCREEN
 import com.example.green_pulse_android.model.User
@@ -16,13 +18,10 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val accountService: AccountService,
-    //private val userRepository: UserRepository  // Inject the repository
+    private val plantRepository: PlantRepository
 ) : GreenPulseViewModel() {
     private val _user = MutableStateFlow(User())
     val user: StateFlow<User> = _user.asStateFlow()
-   // private val _userGameData = MutableStateFlow<UserGameData?>(null)
-   // val userGameData: StateFlow<UserGameData?> = _userGameData.asStateFlow()
-
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
@@ -59,4 +58,21 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun testPlant() {
+        viewModelScope.launch {
+            val result = plantRepository.createTestPlantWithHistory(
+                environment = "Indoors",
+                name = "Debug Plant",
+                type = "tropical"
+            )
+            result.fold(
+                onSuccess = { plantId ->
+                    Log.d("TestPlant", "SUCCESS! Created test plant: $plantId")
+                },
+                onFailure = { e ->
+                    Log.e("TestPlant", "FAILED to create test plant", e)
+                }
+            )
+        }
+    }
 }

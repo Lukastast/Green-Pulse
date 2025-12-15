@@ -4,6 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,13 +31,9 @@ fun HomeScreen(
     openScreen: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    //LaunchedEffect(Unit) { viewModel.initialize(restartApp) }
-
-    //val userGameData by viewModel.userGameData.collectAsState()
     val error by viewModel.error.collectAsState()
     val user by viewModel.user.collectAsState(initial = User())
 
-        // Main centered content
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -68,6 +68,12 @@ fun HomeScreen(
             DisplayNameCard(user.displayName) { viewModel.onUpdateDisplayNameClick(it) }
             ExitAppCard { viewModel.onSignOutClick(restartApp) }
             RemoveAccountCard { viewModel.onDeleteAccountClick(restartApp) }
+            FloatingActionButton(
+                onClick = { viewModel.testPlant() },
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Icon(Icons.Default.BugReport, contentDescription = "Create test data")
+            }
         }
     }
 

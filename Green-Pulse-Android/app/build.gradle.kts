@@ -79,14 +79,12 @@ dependencies {
     // Charts
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
-    // MQTT (your fork is fine; standard alternative if needed: org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5 + org.eclipse.paho:org.eclipse.paho.android.service:1.1.1)
     implementation("com.github.hannesa2:paho.mqtt.android:4.4.2")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.compose.ui:ui:1.6.0")
     implementation("androidx.compose.material3:material3:1.2.0")
     implementation("androidx.compose.runtime:runtime-livedata:1.6.0")
     implementation("com.google.code.gson:gson:2.13.2")
-    // Replace your Paho dep with these two
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     implementation("org.eclipse.paho:org.eclipse.paho.android.service:1.1.1")
 }

@@ -21,18 +21,7 @@ private val DarkMidnightGrove = darkColorScheme(
     tertiary = Color(0xFF5A3A1E),
     background = Color(0xFF0F140D),
     surface = Color(0xFF1F241C)
-    // Add onPrimary = Color.White, onBackground = Color.White, etc., for text overlays
 )
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
-
 
 @Composable
 fun GreenPulseAndroidTheme(
