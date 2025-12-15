@@ -96,34 +96,6 @@ fun PlantHistoryDashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            ExposedDropdownMenuBox(
-                expanded = uiState.expandedEnv,
-                onExpandedChange = { viewModel.toggleEnvDropdown() }
-            ) {
-                OutlinedTextField(
-                    value = uiState.selectedEnvironment,
-                    onValueChange = { },
-                    readOnly = true,
-                    label = { Text("Environment") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = uiState.expandedEnv) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
-                )
-                ExposedDropdownMenu(
-                    expanded = uiState.expandedEnv,
-                    onDismissRequest = { viewModel.toggleEnvDropdown() }
-                ) {
-                    uiState.environments.forEach { env ->
-                        DropdownMenuItem(
-                            text = { Text(env) },
-                            onClick = {
-                                viewModel.selectEnvironment(env)
-                                coroutineScope.launch { viewModel.loadPlantsForEnv(env) }
-                            }
-                        )
-                    }
-                }
-            }
-
             if (uiState.selectedPlantId.isNotEmpty()) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
