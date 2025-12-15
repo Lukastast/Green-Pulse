@@ -12,7 +12,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 # ---------------- MQTT CONFIG ---------------- #
-BROKER = "192.168.0.124"  # Private EMQX broker
+BROKER = "10.42.131.124"  # Private EMQX broker
 PORT = 8883
 USERNAME = "sensor_user" 
 PASSWORD = "securepass123"#securepass123 appsecure456
@@ -179,7 +179,7 @@ def on_message(client, userdata, msg):
             print(f"Missing plantId in message on {msg.topic}")
             return
 
-        # Route based on topic OR action — both work
+        # Route based on topic OR action 
         topic = msg.topic
 
         print(f"MQTT ← {topic}: {payload}")
