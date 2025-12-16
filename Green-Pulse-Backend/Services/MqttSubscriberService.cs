@@ -13,7 +13,7 @@ namespace GreenPulse.Services
         private readonly FirestoreDb _firestore;
         private IMqttClient? _mqttClient;
 
-        private const string BROKER = "localhost";
+        private const string BROKER = "192.168.0.124";
         private const int PORT = 1883;
         private const string USERNAME = "sensor_user";
         private const string PASSWORD = "securepass123";
