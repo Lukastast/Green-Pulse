@@ -13,11 +13,10 @@ namespace GreenPulse.Services
         private readonly FirestoreDb _firestore;
         private IMqttClient? _mqttClient;
 
-        // MQTT Config
-        private const string BROKER = "192.168.0.124"; 
-        private const int PORT = 8883;
-        private const string USERNAME = "app_user";
-        private const string PASSWORD = "appsecure456";
+        private const string BROKER = "localhost";
+        private const int PORT = 1883;
+        private const string USERNAME = "sensor_user";
+        private const string PASSWORD = "securepass123";
         private const string TOPIC = "greenpulse/#";
 
         public MqttSubscriberService(
@@ -41,7 +40,7 @@ namespace GreenPulse.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "MQTT Service crashed");
+                _logger.LogError(ex, "MQTT Subscriber Service crashed");
             }
         }
 
@@ -50,40 +49,32 @@ namespace GreenPulse.Services
             var factory = new MqttClientFactory();
             _mqttClient = factory.CreateMqttClient();
 
-            var tlsOptions = new MqttClientTlsOptions
-            {
-                UseTls = true,
-                SslProtocol = SslProtocols.Tls12 | SslProtocols.Tls13,
-                CertificateValidationHandler = _ => true
-            };
-
             var options = new MqttClientOptionsBuilder()
                 .WithTcpServer(BROKER, PORT)
                 .WithCredentials(USERNAME, PASSWORD)
-                .WithClientId($"greenpulse-dotnet-{Guid.NewGuid()}")
+                .WithClientId($"greenpulse-subscriber-{Guid.NewGuid()}")
                 .WithCleanSession()
                 .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
                 .WithTimeout(TimeSpan.FromSeconds(10))
-                .WithTlsOptions(tlsOptions)
                 .Build();
 
             _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
 
             _mqttClient.ConnectedAsync += async e =>
             {
-                _logger.LogInformation("✅ MQTT connected to {Broker}:{Port}", BROKER, PORT);
+                _logger.LogInformation("✅ MQTT Subscriber connected to {Broker}:{Port}", BROKER, PORT);
 
                 var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
                     .WithTopicFilter(f => f.WithTopic(TOPIC).WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
                     .Build();
 
                 await _mqttClient.SubscribeAsync(subscribeOptions, stoppingToken);
-                _logger.LogInformation("📡 Subscribed to MQTT topic: {Topic}", TOPIC);
+                _logger.LogInformation("📡 Subscribed to: {Topic}", TOPIC);
             };
 
             _mqttClient.DisconnectedAsync += async e =>
             {
-                _logger.LogWarning("❌ MQTT disconnected. Reason: {Reason}", e.Reason);
+                _logger.LogWarning("❌ MQTT Subscriber disconnected. Reason: {Reason}", e.Reason);
 
                 if (!stoppingToken.IsCancellationRequested)
                 {
@@ -96,7 +87,7 @@ namespace GreenPulse.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Reconnection failed.");
+                        _logger.LogError(ex, "Reconnection failed");
                     }
                 }
             };
@@ -112,46 +103,43 @@ namespace GreenPulse.Services
                 string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
                 string topic = e.ApplicationMessage.Topic;
 
-                _logger.LogInformation("📨 Incoming MQTT message on {Topic}", topic);
-                _logger.LogInformation("Payload: {Payload}", payload);
+                _logger.LogDebug("📨 MQTT message on {Topic}", topic);
 
                 using var json = JsonDocument.Parse(payload);
-                string eventType = json.RootElement.GetProperty("event").GetString()!;
+
+                if (!json.RootElement.TryGetProperty("event", out var eventProp))
+                    return Task.CompletedTask;
+
+                string eventType = eventProp.GetString()!;
 
                 switch (eventType)
                 {
-                    case "sensor_update":
-                        _ = SaveSensorUpdate(json.RootElement);
+                    case "status":
+                        _ = SaveStatusToAllUsers(json.RootElement);
                         break;
-
                     case "plant_added":
                         _ = SaveEventLog("plant_added", json.RootElement);
                         break;
-
                     case "plant_watered":
                         _ = SaveEventLog("plant_watered", json.RootElement);
                         break;
-
                     case "ph_adjusted":
                         _ = SaveEventLog("ph_adjusted", json.RootElement);
                         break;
-
                     case "temp_adjusted":
                         _ = SaveEventLog("temp_adjusted", json.RootElement);
                         break;
-
                     case "plant_dead":
                         _ = SaveEventLog("plant_dead", json.RootElement);
                         break;
-
                     default:
-                        _logger.LogWarning("⚠ Unknown event: {EventType}", eventType);
+                        _logger.LogDebug("Unknown event: {EventType}", eventType);
                         break;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error reading MQTT message");
+                _logger.LogError(ex, "Error processing MQTT message");
             }
 
             return Task.CompletedTask;
@@ -161,7 +149,7 @@ namespace GreenPulse.Services
         // FIRESTORE SAVE FUNCTIONS
         // ---------------------------
 
-        private async Task SaveSensorUpdate(JsonElement data)
+        private async Task SaveStatusToAllUsers(JsonElement data)
         {
             try
             {
@@ -171,27 +159,51 @@ namespace GreenPulse.Services
                 double temp = data.GetProperty("temperature").GetDouble();
                 bool alive = data.GetProperty("alive").GetBoolean();
 
-                var docRef = _firestore
-                    .Collection("plants")
-                    .Document(plantId)
-                    .Collection("sensor_updates")
-                    .Document(); // auto-ID
+                // Collection group query uden id-felt
+                var snapshot = await _firestore.CollectionGroup("plants").GetSnapshotAsync();
 
-                await docRef.SetAsync(new
+                var plantDocs = snapshot.Documents
+                    .Where(doc => doc.Id == plantId)
+                    .ToList();
+
+                if (plantDocs.Count == 0)
                 {
-                    plantId,
-                    humidity,
-                    ph,
-                    temperature = temp,
-                    alive,
-                    timestamp = Timestamp.GetCurrentTimestamp()
-                });
+                    _logger.LogDebug("Plant {PlantId} not found in any user's collection", plantId);
+                    return;
+                }
 
-                _logger.LogInformation("🔥 Saved sensor update for plant {PlantId}", plantId);
+                _logger.LogDebug("Found {Count} instances of plant {PlantId}, saving to all",
+                    plantDocs.Count, plantId);
+
+                foreach (var plantDoc in plantDocs)
+                {
+                    try
+                    {
+                        var historyRef = plantDoc.Reference.Collection("history").Document();
+
+                        await historyRef.SetAsync(new
+                        {
+                            alive,
+                            humidity,
+                            ph,
+                            temperature = temp,
+                            timestamp = Timestamp.GetCurrentTimestamp()
+                        });
+
+                        _logger.LogDebug("✅ Saved status to {Path}/history", plantDoc.Reference.Path);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to save to {Path}", plantDoc.Reference.Path);
+                    }
+                }
+
+                _logger.LogInformation("🔥 Saved status for plant {PlantId} to {Count} user(s)",
+                    plantId, plantDocs.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save sensor update");
+                _logger.LogError(ex, "Failed to save status to all users");
             }
         }
 
@@ -199,9 +211,7 @@ namespace GreenPulse.Services
         {
             try
             {
-                var docRef = _firestore
-                    .Collection("event_logs")
-                    .Document();
+                var docRef = _firestore.Collection("event_logs").Document();
 
                 await docRef.SetAsync(new
                 {
@@ -210,7 +220,7 @@ namespace GreenPulse.Services
                     timestamp = Timestamp.GetCurrentTimestamp()
                 });
 
-                _logger.LogInformation("📘 Saved event log: {Event}", type);
+                _logger.LogDebug("📘 Saved event log: {Event}", type);
             }
             catch (Exception ex)
             {
