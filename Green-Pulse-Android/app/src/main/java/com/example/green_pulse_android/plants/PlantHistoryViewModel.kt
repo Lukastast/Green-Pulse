@@ -36,10 +36,6 @@ class PlantHistoryViewModel @Inject constructor(
         val isLoading: Boolean = false
     )
 
-    init {
-        _uiState.update { it.copy(selectedEnvironment = "Indoors") }
-    }
-
     fun toggleEnvDropdown() {
         _uiState.update { it.copy(expandedEnv = !it.expandedEnv) }
     }
@@ -160,6 +156,7 @@ class PlantHistoryViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             selectedPlantName = plant.name ?: "Unknown Plant",
+                            selectedPlantId = plant.id,
                             isLoading = false
                         )
                     }
