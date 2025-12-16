@@ -31,8 +31,8 @@ object MqttModule {
             isCleanSession = true
             keepAliveInterval = 20
             connectionTimeout = 10
-            userName = "sensor_user"
-            password = "securepass123".toCharArray()
+            userName = "app_user"
+            password = "appsecure456".toCharArray()
         }
     }
 }
