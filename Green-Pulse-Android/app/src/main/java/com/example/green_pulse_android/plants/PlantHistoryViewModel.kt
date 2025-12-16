@@ -31,14 +31,10 @@ class PlantHistoryViewModel @Inject constructor(
         val expandedPlant: Boolean = false,
         val selectedPlantId: String = "",
         val selectedPlantName: String = "",
-        val selectedTimeframe: String = "1d",
+        val selectedTimeframe: String = "1h",
         val history: List<PlantHistory> = emptyList(),
         val isLoading: Boolean = false
     )
-
-    init {
-        _uiState.update { it.copy(selectedEnvironment = "Indoors") }
-    }
 
     fun toggleEnvDropdown() {
         _uiState.update { it.copy(expandedEnv = !it.expandedEnv) }
@@ -78,29 +74,30 @@ class PlantHistoryViewModel @Inject constructor(
         loadPlantById(plantId, uiState.value.selectedEnvironment)
         loadHistory(plantId, uiState.value.selectedEnvironment)
     }
-
-    private fun getLimitForTimeframe(): Int? = when (uiState.value.selectedTimeframe) {
-        "1h" -> 4
-        "6h" -> 24
-        "All time" -> null
-        else -> 240
-    }
     fun selectTimeframe(timeframe: String) {
         _uiState.update { it.copy(selectedTimeframe = timeframe) }
         val plantId = uiState.value.selectedPlantId
         val env = uiState.value.selectedEnvironment
+        Log.d("testtt", "${plantId.isNotEmpty()} ${env.isNotEmpty()}")
         if (plantId.isNotEmpty() && env.isNotEmpty()) {
-            loadHistory(plantId, env)
+            loadHistory(plantId, env, timeframe)
         }
     }
 
-    private fun loadHistory(plantId: String, environment: String) {
+    private fun loadHistory(plantId: String, environment: String, newTimeframe: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            val limit = getLimitForTimeframe()
+            val timeframe = newTimeframe ?: uiState.value.selectedTimeframe
+            val limit = when (timeframe) {
+                "1h" -> 10
+                "6h" -> 24
+                "All time" -> null
+                else -> 240
+            }
             val result = plantRepository.getPlantHistory(plantId, environment, limit = limit)
 
+            Log.d("testt","$limit")
             result.fold(
                 onSuccess = { fullHistory ->
                     val displayedHistory = if (limit == null) {
@@ -152,6 +149,7 @@ class PlantHistoryViewModel @Inject constructor(
     }
 
     private fun loadPlantById(plantId: String, environment: String) {
+        Log.d("loadbyid", plantId)
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val plantResult = plantRepository.getPlantById(environment, plantId)
@@ -160,6 +158,7 @@ class PlantHistoryViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             selectedPlantName = plant.name ?: "Unknown Plant",
+                            selectedPlantId = plant.id,
                             isLoading = false
                         )
                     }

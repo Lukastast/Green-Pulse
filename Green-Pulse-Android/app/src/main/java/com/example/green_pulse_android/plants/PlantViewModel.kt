@@ -176,18 +176,18 @@ class PlantViewModel @Inject constructor(
             }
 
             viewModelScope.launch {
-                plantRepository.updatePlantStats(plant.id, plant.environment, humidity, ph, temperature, alive)
-                plantRepository.addHistoryEntry(
-                    plantId = plant.id,
-                    environment = plant.environment,
-                    history = PlantHistory(
-                        timestamp = Timestamp.now(),
-                        humidity = humidity,
-                        ph = ph,
-                        temperature = temperature,
-                        alive = alive
-                    )
-                )
+               // plantRepository.updatePlantStats(plant.id, plant.environment, humidity, ph, temperature, alive)
+                //                plantRepository.addHistoryEntry(
+                //                    plantId = plant.id,
+                //                    environment = plant.environment,
+                //                    history = PlantHistory(
+                //                        timestamp = Timestamp.now(),
+                //                        humidity = humidity,
+                //                        ph = ph,
+                //                        temperature = temperature,
+                //                        alive = alive
+                //                    )
+                //                )
             }
         }
     }

@@ -237,7 +237,7 @@ class PlantRepository @Inject constructor(
     }
 
     suspend fun createTestPlantWithHistory(
-        environment: String = "Indoors",
+        environment: String = "Greenhouse",
         name: String = "Test Plant",
         type: String = "herb"
     ): Result<String> = withContext(Dispatchers.IO) {

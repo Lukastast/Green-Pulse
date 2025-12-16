@@ -61,7 +61,7 @@ class HomeViewModel @Inject constructor(
     fun testPlant() {
         viewModelScope.launch {
             val result = plantRepository.createTestPlantWithHistory(
-                environment = "Indoors",
+                environment = "Greenhouse",
                 name = "Debug Plant",
                 type = "tropical"
             )

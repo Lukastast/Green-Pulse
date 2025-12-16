@@ -1,5 +1,6 @@
 package com.example.green_pulse_android.plants
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,7 +73,8 @@ fun PlantHistoryDashboardScreen(
             viewModel.selectEnvironment(environment)
             coroutineScope.launch { viewModel.loadPlantsForEnv(environment) }
         }
-        if (plantId.isNotEmpty() && plantId != uiState.selectedPlantId) {
+        if (plantId.isNotEmpty()) {
+            Log.d("tet", plantId)
             viewModel.selectPlant(plantId)
         }
     }
@@ -96,7 +98,6 @@ fun PlantHistoryDashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (uiState.selectedPlantId.isNotEmpty()) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -131,7 +132,6 @@ fun PlantHistoryDashboardScreen(
                         ) { Text(metric) }
                     }
                 }
-            }
 
             when {
                 uiState.isLoading -> {
